@@ -904,6 +904,7 @@ const dutyLive = () => { const x = dutyRec(); return x && x.sid && Date.now() - 
 async function setDuty(on) { const old = dutyRec(); if (on) await put({ ...(old || {}), id: "duty", kind: "duty", ym: "setup", user: me.id, name: me.name, sid: me.sid, dev: devId, admin: !!me.admin, at: Date.now(), deleted: false });
   else if (old && old.sid === me?.sid) await put({ ...old, sid: "", at: 0 }); syncSoon(); }
 function dutyCheck() { const x = dutyLive(); if (!me || !x || x.sid === me.sid) return;
+  if (me.admin) { if (!x.admin) setDuty(true); return; }   // the admin is never pushed out by a controller's PC: the admin takes the duty back
   const who = x.name; me = null; metaSet("me", null).catch(() => {}); clearUndo().catch(() => {}); pinFor = null; tab = "now"; closeEv(); render();
   popupMsg("Signed out", `${esc(who)} is now on duty in the Control Room${x.admin ? " (admin)" : ""}. Only one person can be signed in at a time, so this PC was signed out.`); }
 setInterval(() => { if (me && dutyRec()?.sid === me.sid) setDuty(true); }, 2 * 6e4);
