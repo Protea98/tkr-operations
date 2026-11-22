@@ -303,27 +303,27 @@ function reportData(){const c=cycleOf(S.date),upto=c.dates.filter(d=>d<=S.date),
 const ot1=v=>v?hm(v):"0:00",pc1=v=>v==null?"–":v.toFixed(1)+"%",cap=k=>k.charAt(0)+k.slice(1).toLowerCase();
 async function pdfCycle(){const btn=$("pdfCycle");btn.disabled=true;btn.textContent="Making the PDF…";
   try{await loadJs("../lib/jspdf.umd.min.js");await loadJs("../lib/jspdf.plugin.autotable.min.js");
-    const D=reportData(),logo=await logoData(),{jsPDF}=window.jspdf,P=new jsPDF({orientation:"landscape",unit:"mm",format:"a4"}),W=297,GOLD=[212,161,42],BLACK=[17,17,17];
+    const D=reportData(),logo=await logoData(),{jsPDF}=window.jspdf,P=new jsPDF({orientation:"portrait",unit:"mm",format:"a4"}),W=210,GOLD=[212,161,42],BLACK=[17,17,17];
     const head=()=>{P.setFillColor(...BLACK);P.rect(0,0,W,24,"F");P.setFillColor(...GOLD);P.rect(0,24,W,1.4,"F");if(logo)P.addImage(logo,"PNG",10,3.5,17,17);
       P.setTextColor(255,255,255);P.setFont("helvetica","bold");P.setFontSize(14);P.text("TKR OPERATIONS – ATTENDANCE CYCLE REPORT",32,11);
-      P.setTextColor(...GOLD);P.setFontSize(11);P.text("Cycle "+D.period+"   ·   "+D.sheetLbl+"   ·   days counted "+D.upto.length+" of "+D.c.dates.length+" (to "+nice(D.last)+")",32,18.5)};
+      P.setTextColor(...GOLD);P.setFontSize(9.5);P.text("Cycle "+D.period+"   ·   "+D.sheetLbl+"   ·   days counted "+D.upto.length+" of "+D.c.dates.length+" (to "+nice(D.last)+")",32,18.5,{maxWidth:W-40})};
     const tbl=(y,title,headRow,body,opt={})=>{P.setTextColor(...BLACK);P.setFont("helvetica","bold");P.setFontSize(11.5);P.text(title,12,y);
       P.autoTable(Object.assign({startY:y+2,head:[headRow],body,margin:{left:12,right:12,top:30},theme:"grid",styles:{fontSize:8.6,cellPadding:1.6,textColor:BLACK,lineColor:[217,211,197]},
         headStyles:{fillColor:[38,38,38],textColor:255,fontStyle:"bold"},alternateRowStyles:{fillColor:[255,248,230]},didDrawPage:()=>head()},opt));return P.lastAutoTable.finalY+8};
     head();
     // summary tiles
     const tiles=[["People",String(D.rows.length)],["Present days",String(D.all.present)],["Exception days",String(D.all.exc)],["Cycle attendance",pc1(pct(D.all.present,D.all.exc))],["Days counted",D.upto.length+" of "+D.c.dates.length],["New / removed",D.H.filter(h=>h.type==="Added").length+" / "+D.H.filter(h=>h.type==="Removed").length]];
-    tiles.forEach(([k,v],i)=>{const x=12+i*45.5;P.setDrawColor(...GOLD);P.setFillColor(255,248,230);P.roundedRect(x,31,43,20,2,2,"FD");P.setTextColor(110,100,80);P.setFont("helvetica","bold");P.setFontSize(7.5);P.text(k.toUpperCase(),x+3,37);
-      P.setTextColor(...BLACK);P.setFontSize(16);P.text(v,x+3,47)});
+    tiles.forEach(([k,v],i)=>{const x=12+i*31.2;P.setDrawColor(...GOLD);P.setFillColor(255,248,230);P.roundedRect(x,31,29.5,20,2,2,"FD");P.setTextColor(110,100,80);P.setFont("helvetica","bold");P.setFontSize(6.2);P.text(k.toUpperCase(),x+2.5,37,{maxWidth:26});
+      P.setTextColor(...BLACK);P.setFontSize(13);P.text(v,x+2.5,47)});
     let y=60;
     y=tbl(y,"Per sheet",["Sheet","People","Present","AWOP","Leave","Off","Not marked","Attendance"],D.sheets.map(s=>[s.sh,s.n,s.t.present,s.t.absent,s.t.leave,s.t.off,s.t.blank,pc1(s.p)]).concat([[{content:"All",styles:{fontStyle:"bold"}},D.rows.length,D.all.present,D.all.absent,D.all.leave,D.all.off,D.all.blank,pc1(pct(D.all.present,D.all.exc))]]));
-    if(D.codes.length)y=tbl(y,"Absence and leave this cycle (days)",["Code","Days"],D.codes.map(([k,n])=>[cap(showMark(k)),n]),{tableWidth:110});
+    if(D.codes.length)y=tbl(y,"Absence and leave this cycle (days)",["Code","Days"],D.codes.map(([k,n])=>[cap(showMark(k)),n]),{tableWidth:120});
     y=tbl(y,"Lowest attendance this cycle",["Employee","Sheet","Present","Exception days","Attendance"],D.low.length?D.low.map(r=>[r.e.name,r.e.sheet,r.t.present,r.t.exc,pc1(r.p)]):[["No exception days this cycle","","","",""]]);
     y=tbl(y,"New and removed employees this cycle",["Date","Employee","Sheet","What happened"],D.H.length?D.H.map(h=>[nice(h.date)+" "+yr(h.date),h.name,h.sheet,(HTYPE[h.type]||h.type)+(h.type==="Removed"||h.type==="Moved"?" – "+histText(h):"")]):[["","No one added or removed this cycle","",""]]);
     P.addPage();head();
     tbl(32,"Every employee",["Employee","Sheet / group","Present","AWOP",...LEAVE_COLS.map(k=>cap(k.replace(" LEAVE","").replace("FAMILY ","Fam. "))),"Off","Not marked","Attendance"],
-      D.rows.map(r=>[r.e.name,r.e.sheet+" · "+groupLabel(r.e),r.t.present,r.t.absent,...LEAVE_COLS.map(k=>r.t.codes[k]||""),r.t.off,r.t.blank,pc1(r.p)]),{styles:{fontSize:7.6,cellPadding:1.2,textColor:BLACK,lineColor:[217,211,197]}});
-    const n=P.getNumberOfPages();for(let i=1;i<=n;i++){P.setPage(i);P.setFontSize(8);P.setTextColor(120);P.setFont("helvetica","normal");P.text("Attendance = present days ÷ (present + exception days). Exceptions: AWOP, sick and maternity leave.   Printed "+nice(iso(new Date()))+" "+yr(iso(new Date()))+"   ·   page "+i+" of "+n,12,204)}
+      D.rows.map(r=>[r.e.name,r.e.sheet+" · "+groupLabel(r.e),r.t.present,r.t.absent,...LEAVE_COLS.map(k=>r.t.codes[k]||""),r.t.off,r.t.blank,pc1(r.p)]),{styles:{fontSize:6.4,cellPadding:1,textColor:BLACK,lineColor:[217,211,197]}});
+    const n=P.getNumberOfPages();for(let i=1;i<=n;i++){P.setPage(i);P.setFontSize(8);P.setTextColor(120);P.setFont("helvetica","normal");P.text("Attendance = present days ÷ (present + exception days). Exceptions: AWOP, sick and maternity leave.   Printed "+nice(iso(new Date()))+" "+yr(iso(new Date()))+"   ·   page "+i+" of "+n,12,288,{maxWidth:W-24})}
     P.save(D.file+".pdf");toast("PDF report downloaded")}
   catch(e){console.warn(e);toast("The PDF couldn't be made: "+(e.message||"try again"))}
   btn.disabled=false;btn.textContent="Download PDF report"}
@@ -378,15 +378,15 @@ function dailySpec(){const D=dailyData(),day=nice(S.date)+" "+yr(S.date),shift=S
       {title:"Not marked ("+D.blank.length+")",head:["Employee","Sheet",""],rows:names(D.blank)}].concat(onShiftSections(S.dshift==="all"?["day","night","off"]:[S.dshift]))}}
 async function pdfSpec(sp,btn,label){btn.disabled=true;btn.textContent="Making the PDF…";
   try{await loadJs("../lib/jspdf.umd.min.js");await loadJs("../lib/jspdf.plugin.autotable.min.js");
-    const logo=await logoData(),{jsPDF}=window.jspdf,P=new jsPDF({orientation:"landscape",unit:"mm",format:"a4"}),W=297,GOLD=[212,161,42],BLACK=[17,17,17];
+    const logo=await logoData(),{jsPDF}=window.jspdf,P=new jsPDF({orientation:"portrait",unit:"mm",format:"a4"}),W=210,GOLD=[212,161,42],BLACK=[17,17,17];
     const head=()=>{P.setFillColor(...BLACK);P.rect(0,0,W,24,"F");P.setFillColor(...GOLD);P.rect(0,24,W,1.4,"F");if(logo)P.addImage(logo,"PNG",10,3.5,17,17);
-      P.setTextColor(255,255,255);P.setFont("helvetica","bold");P.setFontSize(14);P.text("TKR OPERATIONS – "+sp.title,32,11);P.setTextColor(...GOLD);P.setFontSize(11);P.text(sp.sub,32,18.5)};
-    head();const per=Math.min(sp.tiles.length,6),tw=(W-24-(per-1)*2.5)/per;   // up to 6 tiles a row, more go on a second row
+      P.setTextColor(255,255,255);P.setFont("helvetica","bold");P.setFontSize(14);P.text("TKR OPERATIONS – "+sp.title,32,11);P.setTextColor(...GOLD);P.setFontSize(11);P.text(sp.sub,32,18.5,{maxWidth:W-40})};
+    head();const per=Math.min(sp.tiles.length,4),tw=(W-24-(per-1)*2.5)/per;   // up to 4 tiles a row (portrait), more go on further rows
     sp.tiles.forEach(([k,v],i)=>{const x=12+(i%per)*(tw+2.5),ty=31+Math.floor(i/per)*23;P.setDrawColor(...GOLD);P.setFillColor(255,248,230);P.roundedRect(x,ty,tw,20,2,2,"FD");P.setTextColor(110,100,80);P.setFont("helvetica","bold");P.setFontSize(7.5);P.text(String(k).toUpperCase(),x+3,ty+6,{maxWidth:tw-5});P.setTextColor(...BLACK);P.setFontSize(16);P.text(String(v),x+3,ty+16)});
-    let y=60+(Math.ceil(sp.tiles.length/per)-1)*23;for(const sec of sp.sections){P.setTextColor(...BLACK);P.setFont("helvetica","bold");P.setFontSize(11.5);if(y>185){P.addPage();head();y=34}P.text(sec.title,12,y);
+    let y=60+(Math.ceil(sp.tiles.length/per)-1)*23;for(const sec of sp.sections){P.setTextColor(...BLACK);P.setFont("helvetica","bold");P.setFontSize(11.5);if(y>268){P.addPage();head();y=34}P.text(sec.title,12,y);
       P.autoTable({startY:y+2,head:[sec.head],body:sec.rows.map(r=>r.map(c=>typeof c==="object"?{content:c.content,styles:{fontStyle:"bold",fillColor:[255,242,204]}}:c)),margin:{left:12,right:12,top:30},theme:"grid",
         styles:{fontSize:8.8,cellPadding:1.6,textColor:BLACK,lineColor:[217,211,197]},headStyles:{fillColor:[38,38,38],textColor:255,fontStyle:"bold"},alternateRowStyles:{fillColor:[255,248,230]},didDrawPage:()=>head()});y=P.lastAutoTable.finalY+9}
-    const n=P.getNumberOfPages();for(let i=1;i<=n;i++){P.setPage(i);P.setFontSize(8);P.setTextColor(120);P.setFont("helvetica","normal");P.text("Attendance = present ÷ (present + exception days). Exceptions: AWOP, sick and maternity leave.   Printed "+nice(iso(new Date()))+" "+yr(iso(new Date()))+"   ·   page "+i+" of "+n,12,204)}
+    const n=P.getNumberOfPages();for(let i=1;i<=n;i++){P.setPage(i);P.setFontSize(8);P.setTextColor(120);P.setFont("helvetica","normal");P.text("Attendance = present ÷ (present + exception days). Exceptions: AWOP, sick and maternity leave.   Printed "+nice(iso(new Date()))+" "+yr(iso(new Date()))+"   ·   page "+i+" of "+n,12,288,{maxWidth:W-24})}
     P.save(sp.file+".pdf");toast("PDF report downloaded")}
   catch(e){console.warn(e);toast("The PDF couldn't be made: "+(e.message||"try again"))}
   btn.disabled=false;btn.textContent=label}
