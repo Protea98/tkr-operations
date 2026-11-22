@@ -216,6 +216,9 @@ function dashSpec(){const c=cycleOf(S.date),upto=c.dates.filter(d=>d<=S.date),A=
   const sections=[];
   if(S.sheet==="All")sections.push({title:"Per sheet",head:["Sheet","People","Present today","Absent","Leave","Off","Not marked","Cycle attendance"],rows:sheets.map(r=>r.map(String))});
   sections.push({title:"Exception days this cycle ("+exc.length+" employee"+(exc.length===1?"":"s")+")",head:["Employee","Number","Sheet","Exception days","Attendance"],rows:exc.length?exc.map(x=>[x.e.name,x.e.number||"",x.e.sheet,String(x.t.exc),fmtPct(pct(x.t.present,x.t.exc))]):[["No exception days this cycle","","","",""]]});
+  {const P=A.filter(e=>kindOf(markOf(e,S.date))==="present"),sh=e=>{const r=shiftOn(e,S.date);return r==="NIGHT"?"night":r==="DAY"?"day":"off"};   // who is at work today, as on the dashboard
+   for(const [k,t] of [["day","Day shift present"],["night","Night shift present"],["off","Off by rota but at work"]]){const L=P.filter(e=>sh(e)===k).sort((a,b)=>SHEETS.indexOf(a.sheet)-SHEETS.indexOf(b.sheet)||a.name.localeCompare(b.name));
+     if(k==="off"&&!L.length)continue;sections.push({title:t+" ("+L.length+")",head:["Employee","Number","Sheet","Clocked"],rows:L.length?L.map(e=>{const v=markOf(e,S.date);return [e.name,e.number||"",e.sheet,(isTime(v)||isHrs(v))?showMark(v):""]}):[["Nobody marked present","","",""]]})}}
   if(codes.length)sections.push({title:"Absence and leave this cycle",head:["Mark","Days","Counts as"],rows:codes.map(([k,n])=>[showMark(k),String(n),BAD_CODES.includes(k)?"Exception (counts against attendance)":kindOf(k)==="leave"?"Leave (not counted)":"Not counted"])});
   const sub=nice(S.date)+" "+yr(S.date)+"   ·   cycle "+short(c.start)+" – "+short(c.end)+" ("+upto.length+" of "+c.dates.length+" days)"+(S.sheet!=="All"?"   ·   "+S.sheet:"");
   return {title:"ATTENDANCE DASHBOARD",sub,file:"TKR_Attendance_Dashboard_"+S.date+(S.sheet!=="All"?"_"+S.sheet.replace(/\W+/g,"_"):""),tiles,sections}}
