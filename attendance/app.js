@@ -194,10 +194,7 @@ function viewDash(){const c=cycleOf(S.date),upto=c.dates.filter(d=>d<=S.date),A=
   h+='<h2 style="margin:6px 0 4px">'+nice(S.date)+' '+yr(S.date)+'</h2><p class="note" style="margin:0 0 10px">Cycle '+short(c.start)+' – '+short(c.end)+' · '+upto.length+' of '+c.dates.length+' days so far'+(S.sheet!=="All"?' · '+esc(S.sheet):'')+'</p>';
   h+='<div class="summary">'+stat("People on the register",A.length)+stat("Present today",tD.present)+stat("Absent today",tD.absent,tD.absent?"warn":"")+stat("On leave today",tD.leave)+stat("Off today",tD.off)+stat("Not marked yet today",tD.blank,tD.blank?"warn":"")+'</div>';
   h+='<div class="summary">'+stat("Cycle attendance",fmtPct(pct(tC.present,tC.exc)),"pct")+stat("Exception days this cycle",tC.exc)+stat("Overtime this cycle",(Math.round(tC.ot*10)/10)+" h")+stat("New this cycle",H.filter(x=>x.type==="Added").length)+stat("Removed this cycle",H.filter(x=>x.type==="Removed").length)+'</div>';
-  {const A=activeEmps(),P=A.filter(e=>kindOf(markOf(e,S.date))==="present"),sh=e=>{const r=shiftOn(e,S.date);return r==="NIGHT"?"night":r==="DAY"?"day":"off"};   // who is at work today, every department whatever sheet is picked above
-   const col=k=>{const L=P.filter(e=>sh(e)===k);return '<div class="list"><h3>'+(k==="off"?'Off by the rota but at work':SHIFT_LBL[k]+' – present')+' ('+L.length+')</h3>'+(L.length?deptList(A).map(s=>{const es=L.filter(e=>deptOf(e)===s).sort((a,b)=>a.name.localeCompare(b.name));if(!es.length)return"";   // only the people present
-     return '<p class="note" style="margin:8px 0 2px"><b>'+esc(s)+'</b> · '+es.length+'</p><ul style="margin:0">'+es.map(e=>{const v=markOf(e,S.date);return '<li>'+esc(e.name)+((isTime(v)||isHrs(v))?' <span class="note">'+esc(showMark(v))+'</span>':"")+'</li>'}).join("")+'</ul>'}).join(""):'<p class="none">Nobody present.</p>')+'</div>'};
-   const off=P.filter(e=>sh(e)==="off").length;h+='<h3 style="margin:14px 0 6px">On shift today</h3><div class="lists">'+col("day")+col("night")+(off?col("off"):"")+'</div>'}
+  h+=onShiftHTML(["day","night","off"]);
   if(tD.blank&&S.canWrite)h+='<div class="bar"><button class="btn gold" data-go="mark">Mark today ('+tD.blank+' not marked)</button></div>';
   if(S.sheet==="All")h+='<div class="list"><h3>Per sheet</h3><table class="tbl"><thead><tr><th>Sheet</th><th>People</th><th>Present today</th><th>Absent</th><th>Leave</th><th>Off</th><th>Not marked</th><th>Cycle attendance</th><th>Overtime (cycle)</th></tr></thead><tbody>'+SHEETS.map(sh=>{const es=A.filter(e=>e.sheet===sh);if(!es.length)return"";const t=tally(es,[S.date]),tc=tally(es,upto);
     return '<tr><td><b>'+esc(sh)+'</b></td><td>'+es.length+'</td><td>'+t.present+'</td><td>'+t.absent+'</td><td>'+t.leave+'</td><td>'+t.off+'</td><td>'+(t.blank?'<b style="color:var(--bad,#c0392b)">'+t.blank+'</b>':"0")+'</td><td>'+fmtPct(pct(tc.present,tc.exc))+'</td><td>'+(Math.round(tc.ot*10)/10)+' h</td></tr>'}).join("")+'</tbody></table></div>';
@@ -219,10 +216,7 @@ function dashSpec(){const c=cycleOf(S.date),upto=c.dates.filter(d=>d<=S.date),A=
   const sections=[];
   if(S.sheet==="All")sections.push({title:"Per sheet",head:["Sheet","People","Present today","Absent","Leave","Off","Not marked","Cycle attendance"],rows:sheets.map(r=>r.map(String))});
   sections.push({title:"Exception days this cycle ("+exc.length+" employee"+(exc.length===1?"":"s")+")",head:["Employee","Number","Sheet","Exception days","Attendance"],rows:exc.length?exc.map(x=>[x.e.name,x.e.number||"",x.e.sheet,String(x.t.exc),fmtPct(pct(x.t.present,x.t.exc))]):[["No exception days this cycle","","","",""]]});
-  {const A=activeEmps(),P=A.filter(e=>kindOf(markOf(e,S.date))==="present"),sh=e=>{const r=shiftOn(e,S.date);return r==="NIGHT"?"night":r==="DAY"?"day":"off"};   // who is at work today, every department
-   sections.push({title:"On shift today by department",head:["Department","Day shift present","Night shift present","Off by rota but at work","Total present"],rows:deptList(A).map(x=>{const pp=P.filter(e=>deptOf(e)===x);return pp.length?[x,String(pp.filter(e=>sh(e)==="day").length),String(pp.filter(e=>sh(e)==="night").length),String(pp.filter(e=>sh(e)==="off").length),String(pp.length)]:null}).filter(Boolean)});
-   for(const [k,t] of [["day","Day shift present"],["night","Night shift present"],["off","Off by rota but at work"]]){const DL=deptList(A),L=P.filter(e=>sh(e)===k).sort((a,b)=>DL.indexOf(deptOf(a))-DL.indexOf(deptOf(b))||a.name.localeCompare(b.name));
-     if(k==="off"&&!L.length)continue;sections.push({title:t+" ("+L.length+")",head:["Employee","Number","Department","Clocked"],rows:L.length?L.map(e=>{const v=markOf(e,S.date);return [e.name,e.number||"",deptOf(e),(isTime(v)||isHrs(v))?showMark(v):""]}):[["Nobody marked present","","",""]]})}}
+  sections.push(...onShiftSections(["day","night","off"]));
   if(codes.length)sections.push({title:"Absence and leave this cycle",head:["Mark","Days","Counts as"],rows:codes.map(([k,n])=>[showMark(k),String(n),BAD_CODES.includes(k)?"Exception (counts against attendance)":kindOf(k)==="leave"?"Leave (not counted)":"Not counted"])});
   const sub=nice(S.date)+" "+yr(S.date)+"   ·   cycle "+short(c.start)+" – "+short(c.end)+" ("+upto.length+" of "+c.dates.length+" days)"+(S.sheet!=="All"?"   ·   "+S.sheet:"");
   return {title:"ATTENDANCE DASHBOARD",sub,file:"TKR_Attendance_Dashboard_"+S.date+(S.sheet!=="All"?"_"+S.sheet.replace(/\W+/g,"_"):""),tiles,sections}}
@@ -236,6 +230,18 @@ function dashReport(fmt,btn){const sp=dashSpec();
 function cycleBanner(){const gap=rotaGap();if(!gap)return"";const c=cycleOf(S.date);
   return '<div class="list" style="margin-bottom:14px"><h3>Shift rotas</h3><p class="note" style="margin:0 0 8px">'+gap+' day'+(gap===1?"":"s")+' in '+short(c.start)+' – '+short(c.end)+' have no shift rota yet. Carry the shift pattern forward to fill them.</p><button class="btn gold" id="startCycle">Carry shift pattern forward</button></div>'}
 
+function onShiftHTML(keys){let h="";const A=activeEmps(),P=A.filter(e=>kindOf(markOf(e,S.date))==="present"),sh=e=>{const r=shiftOn(e,S.date);return r==="NIGHT"?"night":r==="DAY"?"day":"off"};   // who is at work today, every department whatever sheet is picked above
+   const col=k=>{const L=P.filter(e=>sh(e)===k);return '<div class="list"><h3>'+(k==="off"?'Off by the rota but at work':SHIFT_LBL[k]+' – present')+' ('+L.length+')</h3>'+(L.length?deptList(A).map(s=>{const es=L.filter(e=>deptOf(e)===s).sort((a,b)=>a.name.localeCompare(b.name));if(!es.length)return"";   // only the people present
+     return '<p class="note" style="margin:8px 0 2px"><b>'+esc(s)+'</b> · '+es.length+'</p><ul style="margin:0">'+es.map(e=>{const v=markOf(e,S.date);return '<li>'+esc(e.name)+((isTime(v)||isHrs(v))?' <span class="note">'+esc(showMark(v))+'</span>':"")+'</li>'}).join("")+'</ul>'}).join(""):'<p class="none">Nobody present.</p>')+'</div>'};
+   const off=P.filter(e=>sh(e)==="off").length;return '<h3 style="margin:14px 0 6px">On shift today</h3><div class="lists">'+keys.filter(k=>k!=="off"||off).map(col).join("")+'</div>'}
+function onShiftSections(keys){const sections=[];const A=activeEmps(),P=A.filter(e=>kindOf(markOf(e,S.date))==="present"),sh=e=>{const r=shiftOn(e,S.date);return r==="NIGHT"?"night":r==="DAY"?"day":"off"};   // who is at work today, every department
+   sections.push({title:"On shift today by department",head:["Department","Day shift present","Night shift present","Off by rota but at work","Total present"],rows:deptList(A).map(x=>{const pp=P.filter(e=>deptOf(e)===x);return pp.length?[x,String(pp.filter(e=>sh(e)==="day").length),String(pp.filter(e=>sh(e)==="night").length),String(pp.filter(e=>sh(e)==="off").length),String(pp.length)]:null}).filter(Boolean)});
+   for(const [k,t] of [["day","Day shift present"],["night","Night shift present"],["off","Off by rota but at work"]].filter(([k])=>keys.includes(k))){const DL=deptList(A),L=P.filter(e=>sh(e)===k).sort((a,b)=>DL.indexOf(deptOf(a))-DL.indexOf(deptOf(b))||a.name.localeCompare(b.name));
+     if(k==="off"&&!L.length)continue;sections.push({title:t+" ("+L.length+")",head:["Employee","Number","Department","Clocked"],rows:L.length?L.map(e=>{const v=markOf(e,S.date);return [e.name,e.number||"",deptOf(e),(isTime(v)||isHrs(v))?showMark(v):""]}):[["Nobody marked present","","",""]]})}return sections}
+function onShiftText(keys){const A=activeEmps(),P=A.filter(e=>kindOf(markOf(e,S.date))==="present"),sh=e=>{const r=shiftOn(e,S.date);return r==="NIGHT"?"night":r==="DAY"?"day":"off"},DL=deptList(A);let t="";
+  for(const [k,lb] of [["day","Day shift present"],["night","Night shift present"],["off","Off by the rota but at work"]]){if(!keys.includes(k))continue;const L=P.filter(e=>sh(e)===k);if(k==="off"&&!L.length)continue;
+    t+="\n*"+lb+" ("+L.length+")*\n"+(L.length?DL.map(d=>{const es=L.filter(e=>deptOf(e)===d).sort((a,b)=>a.name.localeCompare(b.name));return es.length?"_"+d+"_ ("+es.length+")\n"+es.map(e=>"- "+e.name).join("\n")+"\n":""}).join(""):"Nobody present\n")}
+  return t}
 function viewMark(){
   const list=filtered();const groups=bySheetGroup(list);const t=tally(list,[S.date]);const cd=rangeDates(cycleOf(S.date).start,S.date);
   let h=cycleBanner()+chipsBar('<input class="search" id="q" type="search" placeholder="Search name, number or job" value="'+esc(S.q)+'">');
@@ -266,6 +272,7 @@ function viewDaily(){const D=dailyData();
   D.rows.forEach(r=>{h+=trow(r.sheet,r.n,r.t)});h+=trow("Total",D.n,D.all,"tot")+'</tbody></table></div>';
   const li=(arr,f)=>arr.length?'<ul>'+arr.map(e=>'<li>'+esc(e.name)+' <span class="note">'+esc(e.sheet)+(f?" · "+esc(f(e)):"")+'</span></li>').join("")+'</ul>':'<p class="none">None</p>';
   h+='<div class="lists"><div class="list"><h3>AWOP ('+D.awop.length+')</h3>'+li(D.awop)+'</div><div class="list"><h3>On leave ('+D.leave.length+')</h3>'+li(D.leave,e=>markOf(e,S.date))+'</div><div class="list"><h3>Not marked ('+D.blank.length+')</h3>'+li(D.blank)+'</div><div class="list"><h3>Overtime ('+fmtH(D.all.ot)+' h)</h3>'+li(D.ot,e=>fmtH(otOf(e,S.date))+' h')+'</div></div>';
+  h+=onShiftHTML(S.dshift==="all"?["day","night","off"]:[S.dshift]);   // who is at work, by shift and department
   main.innerHTML=h;
 }
 function trow(name,n,t,cls){const p=pct(t.present,t.exc);return '<tr class="'+(cls||"")+'"><td>'+esc(name)+'</td><td>'+n+'</td><td>'+t.present+'</td><td>'+t.absent+'</td><td>'+t.leave+'</td><td>'+t.off+'</td><td>'+t.out+'</td><td>'+t.blank+'</td><td>'+hm(t.ot)+'</td><td class="pc">'+fmtPct(p)+'</td></tr>'}
@@ -275,6 +282,7 @@ function dailyText(){const D=dailyData();let s="*TKR Operations – Daily Attend
   if(D.awop.length)s+="\n*AWOP*\n"+D.awop.map(e=>"- "+e.name+" ("+e.sheet+")").join("\n")+"\n";
   if(D.ot.length)s+="\n*Overtime* ("+fmtH(D.all.ot)+" h)\n"+D.ot.map(e=>"- "+e.name+" ("+e.sheet+"): "+fmtH(otOf(e,S.date))+" h").join("\n")+"\n";
   if(D.leave.length)s+="\n*On leave*\n"+D.leave.map(e=>"- "+e.name+" ("+e.sheet+"): "+markOf(e,S.date)).join("\n")+"\n";
+  s+=onShiftText(S.dshift==="all"?["day","night","off"]:[S.dshift]);
   return s}
 
 const LEAVE_COLS=["ANNUAL LEAVE","SICK","FAMILY RESPONSIBILITY","FAMILY EMERGENCY","STUDY LEAVE","MATERNITY LEAVE"];
@@ -366,7 +374,7 @@ function dailySpec(){const D=dailyData(),day=nice(S.date)+" "+yr(S.date),shift=S
     sections:[{title:"Per sheet",head:["Sheet","Employees","Present","AWOP","Leave","Off","Resigned, absconded, dismissed, deceased, suspended","Not marked","Attendance"],rows:D.rows.map(r=>row(r.sheet,r.n,r.t)).concat([row("Total",D.n,D.all,1)])},
       {title:"AWOP ("+D.awop.length+")",head:["Employee","Sheet",""],rows:names(D.awop)},
       {title:"On leave ("+D.leave.length+")",head:["Employee","Sheet","Leave"],rows:names(D.leave,e=>cap(showMark(markOf(e,S.date))))},
-      {title:"Not marked ("+D.blank.length+")",head:["Employee","Sheet",""],rows:names(D.blank)}]}}
+      {title:"Not marked ("+D.blank.length+")",head:["Employee","Sheet",""],rows:names(D.blank)}].concat(onShiftSections(S.dshift==="all"?["day","night","off"]:[S.dshift]))}}
 async function pdfSpec(sp,btn,label){btn.disabled=true;btn.textContent="Making the PDF…";
   try{await loadJs("../lib/jspdf.umd.min.js");await loadJs("../lib/jspdf.plugin.autotable.min.js");
     const logo=await logoData(),{jsPDF}=window.jspdf,P=new jsPDF({orientation:"landscape",unit:"mm",format:"a4"}),W=297,GOLD=[212,161,42],BLACK=[17,17,17];
@@ -870,6 +878,8 @@ async function xlsRange(from,to,shift){try{await loadRange(from,to)}catch(e){toa
   const ws0=XLSX.utils.aoa_to_sheet(sum);ws0["!cols"]=[{wch:20},{wch:10},{wch:9}].concat(EXC.map(()=>({wch:12})),[{wch:8},{wch:12},{wch:11},{wch:14},{wch:13}]);
   for(let r=4;r<sum.length;r++){const ref=XLSX.utils.encode_cell({r,c:sumHead.length-1});if(ws0[ref]&&typeof ws0[ref].v==="number")ws0[ref].z="0.0%"}
   XLSX.utils.book_append_sheet(wb,ws0,"Summary");
+  if(from===to&&from===S.date){const aoa=[["On shift – "+periodText(from,to)]];for(const sec of onShiftSections(shift==="all"?["day","night","off"]:[shift]))aoa.push([],[sec.title],sec.head,...sec.rows);   // who was at work, by shift and department
+    const wsO=XLSX.utils.aoa_to_sheet(aoa);wsO["!cols"]=[{wch:30},{wch:16},{wch:28},{wch:12},{wch:14}];XLSX.utils.book_append_sheet(wb,wsO,"On shift")}
   bySheetGroup(es).forEach(s=>{const head=["Employee","Number","Department","Job Title"].concat(dates.map(short),["Present"],EXC,["Off","Not marked","Overtime hours","Attendance %"]);const aoa=[[s.sheet+" – "+periodText(from,to)],head];
     s.groups.forEach(g=>{aoa.push([g.label,"","",""].concat(dates.map(d=>rotaFor(g.id,d))));
       g.emps.forEach(e=>{const t=tally([e],dates);const p=pct(t.present,t.exc);aoa.push([e.name,e.number,e.dept,e.title].concat(dates.map(d=>showMark(markOf(e,d))),[t.present],EXC.map(k=>t.codes[k]||0),[t.off,t.blank,hm(t.ot),p==null?"":p/100]))})});
