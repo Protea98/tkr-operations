@@ -1393,7 +1393,7 @@ async function syncNow(manual) {
     const snap = await getDocs(query(collection(db, "ctrl"), where("ym", "in", yms)));
     let n = 0; for (const d of snap.docs) { const r = d.data(), have = recs.find(x => x.id === r.id);
       if (!have || (r.editedAt || 0) > (have.editedAt || 0)) { const nr = { ...r, synced: r.editedAt }; await tx("readwrite", t => t.objectStore("rec").put(nr)); n++; } }
-    recs = await all(); bump(); dutyCheck(); if (me) { await backfillRigs(); await busUpdate(); await seedFleetReports(); await clearAhead(); await purgeFuture(); await undoDay21(); await restoreDay21(); await busesDown21(); await joinRuns(); await cof22(); await healCells(); await keepAchieved(); } sync.last = Date.now(); await metaSet("syncLast", sync.last); liveWatch(yms); sync.msg = `Sent and checked ${new Date(Date.now()).toTimeString().slice(0, 5)}${n ? ` · ${n} changes from other devices` : ""}.`;
+    recs = await all(); bump(); dutyCheck(); await approvePhumi().catch(() => {}); if (me) { await backfillRigs(); await busUpdate(); await seedFleetReports(); await clearAhead(); await purgeFuture(); await undoDay21(); await restoreDay21(); await busesDown21(); await joinRuns(); await cof22(); await healCells(); await keepAchieved(); } sync.last = Date.now(); await metaSet("syncLast", sync.last); liveWatch(yms); sync.msg = `Sent and checked ${new Date(Date.now()).toTimeString().slice(0, 5)}${n ? ` · ${n} changes from other devices` : ""}.`;
     if (manual) toast("The TKR app is up to date.");
   } catch (e) { console.warn(e); sync.msg = e?.code === "permission-denied" ? "The TKR app's Firebase rules don't allow the Control Room yet (Muneer publishes them once)." : "Couldn't reach the TKR app. It tries again by itself."; if (manual) toast(sync.msg); }
   sync.busy = false; if (me && !sheetDirty && !document.activeElement?.closest?.("#fDay") && !document.getElementById("evPanel") && !document.querySelector(".sheet:not([hidden])")) render();
@@ -1496,6 +1496,10 @@ async function healCells() {
         if (cells[h] == null) { cells[h] = v; ch = true; n++; } }   // missing (not cleared: a cleared box is "-")
       if (ch) await put(r ? { ...r, cells } : { id, kind: "hr", ym: d.slice(0, 7), date: d, machine: mc, cells }); } }
   if (n) { undo = keep; await metaSet("undo", undo).catch(() => {}); bump(); } }
+/* Muneer (admin) asked on 22/11/2026 06:43: approve Phumi as a controller */
+async function approvePhumi() {
+  for (const u of R("user").filter(u => /phum/i.test(u.name || "") && u.status === "pending" && (u.addedAt || 0) < toMs("2026-11-22T06:44")))
+    await put({ ...u, status: "approved", decidedBy: "Muneer (admin)", decidedAt: Date.now() }, `Admin approved ${u.name} as a controller`); }
 async function busesDown21() {
   const KEY = "seed_buses_down_2026-11-21"; if (recs.some(r => r.id === KEY)) return;
   const keep = undo.slice(), AT = "2026-11-21T06:00";
