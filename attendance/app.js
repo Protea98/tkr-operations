@@ -69,7 +69,7 @@ function toast(t){const el=document.createElement("div");el.className="toast";el
 const monthOf=d=>d.slice(0,7);
 function monthsIn(from,to){const out=[];let m=monthOf(from);const last=monthOf(to);while(m<=last){out.push(m);let [y,mm]=m.split("-").map(Number);mm++;if(mm>12){mm=1;y++}m=y+"-"+pad(mm)}return out}
 const live={};
-function applyMonth(m,snap){const o={};snap.docs.forEach(d=>{S.mExists[m+"/"+d.id]=true;o[d.id]={marks:d.data().marks||{},ot:d.data().ot||{},ottype:d.data().ottype||{}}});S.mm[m]=o}
+function applyMonth(m,snap){const o={};snap.docs.forEach(d=>{S.mExists[m+"/"+d.id]=true;o[d.id]={marks:d.data().marks||{},ot:d.data().ot||{},ottype:d.data().ottype||{},xs:d.data().xs||{}}});S.mm[m]=o}
 function watchCycle(){const c=cycleOf(S.date);monthsIn(c.start,c.end).forEach(m=>{if(live[m])return;
   live[m]=S.db.collection("months/"+m+"/sheets").onSnapshot(snap=>{applyMonth(m,snap);render()},err)})}
 async function loadRange(from,to){await Promise.all(monthsIn(from,to).filter(m=>!live[m]).map(async m=>{const snap=await S.db.collection("months/"+m+"/sheets").get();applyMonth(m,snap)}))}
@@ -77,7 +77,7 @@ function err(e){const perm=e&&(e.code==="permission-denied"||/permission/i.test(
 function denied(e){return e&&(e.code==="invalid_argument"||e.code==="permission-denied")}
 function writeSheet(sheet,patch,field){ // patch: {empId:{date:val}} for dates in S.date's month; field: "marks" or "ot"
   field=field||"marks";const id=SHEET_ID[sheet],m=monthOf(S.date);
-  const mo=S.mm[m]=S.mm[m]||{};const sd=mo[id]=mo[id]||{marks:{},ot:{}};const store=sd[field];for(const k in patch){store[k]=Object.assign({},store[k]||{},patch[k])}
+  const mo=S.mm[m]=S.mm[m]||{};const sd=mo[id]=mo[id]||{marks:{},ot:{}};const store=sd[field]=sd[field]||{};for(const k in patch){store[k]=Object.assign({},store[k]||{},patch[k])}
   S.db.doc("months/"+m+"/sheets/"+id).update({sheet,month:m,[field]:patch,updatedBy:email,updatedAt:Date.now()})
     .catch(e=>{if(denied(e)){S.canWrite=false;toast("You can view this register but not mark it. Ask admin for capture access.")}else toast("Not saved: "+(e&&e.message||"try again"));render()});
   render();
@@ -86,6 +86,7 @@ const cell=(e,d,f)=>((((S.mm[monthOf(d)]||{})[SHEET_ID[e.sheet]]||{})[f]||{})[e.
 const rawMark=(e,d)=>cell(e,d,"marks")||"";
 const markOf=(e,d)=>{const v=rawMark(e,d);if(!v&&e.leftDate&&d>e.leftDate)return e.leftReason||"RESIGNED";return v};
 const otOf=(e,d)=>Number(cell(e,d,"ot"))||0;
+const xsOf=(e,d)=>cell(e,d,"xs")||"";   // the shift worked by someone at work on a rota off day: DAY or NIGHT
 const fmtH=h=>String(Math.round(h*10)/10);
 function setOt(e,h){if(!S.canWrite){toast("You can view this register but not mark it.");return}writeSheet(e.sheet,{[e.id]:{[S.date]:h}},"ot")}
 function setMark(e,val){if(!S.canWrite){toast("You can view this register but not mark it.");return}writeSheet(e.sheet,{[e.id]:{[S.date]:val}})}
@@ -230,17 +231,17 @@ function dashReport(fmt,btn){const sp=dashSpec();
 function cycleBanner(){const gap=rotaGap();if(!gap)return"";const c=cycleOf(S.date);
   return '<div class="list" style="margin-bottom:14px"><h3>Shift rotas</h3><p class="note" style="margin:0 0 8px">'+gap+' day'+(gap===1?"":"s")+' in '+short(c.start)+' – '+short(c.end)+' have no shift rota yet. Carry the shift pattern forward to fill them.</p><button class="btn gold" id="startCycle">Carry shift pattern forward</button></div>'}
 
-function onShiftHTML(keys){let h="";const A=activeEmps(),P=A.filter(e=>kindOf(markOf(e,S.date))==="present"),sh=e=>{const r=shiftOn(e,S.date);return r==="NIGHT"?"night":r==="DAY"?"day":"off"};   // who is at work today, every department whatever sheet is picked above
-   const col=k=>{const L=P.filter(e=>sh(e)===k);return '<div class="list"><h3>'+(k==="off"?'Off by the rota but at work':SHIFT_LBL[k]+' – present')+' ('+L.length+')</h3>'+(L.length?deptList(A).map(s=>{const es=L.filter(e=>deptOf(e)===s).sort((a,b)=>a.name.localeCompare(b.name));if(!es.length)return"";   // only the people present
-     return '<p class="note" style="margin:8px 0 2px"><b>'+esc(s)+'</b> · '+es.length+'</p><ul style="margin:0">'+es.map(e=>{const v=markOf(e,S.date);return '<li>'+esc(e.name)+((isTime(v)||isHrs(v))?' <span class="note">'+esc(showMark(v))+'</span>':"")+'</li>'}).join("")+'</ul>'}).join(""):'<p class="none">Nobody present.</p>')+'</div>'};
+function onShiftHTML(keys){let h="";const A=activeEmps(),P=A.filter(e=>kindOf(markOf(e,S.date))==="present"),sh=e=>{const r=shiftOn(e,S.date);if(r==="NIGHT")return"night";if(r==="DAY")return"day";const x=xsOf(e,S.date);return !keys.includes("off")&&x?(x==="DAY"?"day":"night"):"off"};   // who is at work today, every department whatever sheet is picked above
+   const col=k=>{const L=P.filter(e=>sh(e)===k);return '<div class="list"><h3>'+(k==="off"?'Off by the rota but at work – day or night shift':SHIFT_LBL[k]+' – present')+' ('+L.length+')</h3>'+(L.length?deptList(A).map(s=>{const es=L.filter(e=>deptOf(e)===s).sort((a,b)=>a.name.localeCompare(b.name));if(!es.length)return"";   // only the people present
+     return '<p class="note" style="margin:8px 0 2px"><b>'+esc(s)+'</b> · '+es.length+'</p><ul style="margin:0">'+es.map(e=>{const v=markOf(e,S.date),x=xsOf(e,S.date);return '<li>'+esc(e.name)+((isTime(v)||isHrs(v))?' <span class="note">'+esc(showMark(v))+'</span>':"")+(k==="off"?' <span style="white-space:nowrap">'+["DAY","NIGHT"].map(z=>'<button class="chip" style="padding:2px 9px;margin-left:4px" data-xs="'+e.id+'|'+z+'" aria-pressed="'+(x===z)+'"'+(S.canWrite?"":" disabled")+'>'+(z==="DAY"?"Day":"Night")+'</button>').join("")+'</span>':"")+'</li>'}).join("")+'</ul>'}).join(""):'<p class="none">Nobody present.</p>')+'</div>'};
    const off=P.filter(e=>sh(e)==="off").length;return '<h3 style="margin:14px 0 6px">On shift today</h3><div class="lists">'+keys.filter(k=>k!=="off"||off).map(col).join("")+'</div>'}
-function onShiftSections(keys){const sections=[];const A=activeEmps(),P=A.filter(e=>kindOf(markOf(e,S.date))==="present"),sh=e=>{const r=shiftOn(e,S.date);return r==="NIGHT"?"night":r==="DAY"?"day":"off"};   // who is at work today, every department
+function onShiftSections(keys){const sections=[];const A=activeEmps(),P=A.filter(e=>kindOf(markOf(e,S.date))==="present"),sh=e=>{const r=shiftOn(e,S.date);if(r==="NIGHT")return"night";if(r==="DAY")return"day";const x=xsOf(e,S.date);return !keys.includes("off")&&x?(x==="DAY"?"day":"night"):"off"};   // who is at work today, every department
    sections.push({title:"On shift today by department",head:["Department","Day shift present","Night shift present","Off by rota but at work","Total present"],rows:deptList(A).map(x=>{const pp=P.filter(e=>deptOf(e)===x);return pp.length?[x,String(pp.filter(e=>sh(e)==="day").length),String(pp.filter(e=>sh(e)==="night").length),String(pp.filter(e=>sh(e)==="off").length),String(pp.length)]:null}).filter(Boolean)});
    for(const [k,t] of [["day","Day shift present"],["night","Night shift present"],["off","Off by rota but at work"]].filter(([k])=>keys.includes(k))){const DL=deptList(A),L=P.filter(e=>sh(e)===k).sort((a,b)=>DL.indexOf(deptOf(a))-DL.indexOf(deptOf(b))||a.name.localeCompare(b.name));
-     if(k==="off"&&!L.length)continue;sections.push({title:t+" ("+L.length+")",head:["Employee","Number","Department","Clocked"],rows:L.length?L.map(e=>{const v=markOf(e,S.date);return [e.name,e.number||"",deptOf(e),(isTime(v)||isHrs(v))?showMark(v):""]}):[["Nobody marked present","","",""]]})}return sections}
-function onShiftText(keys){const A=activeEmps(),P=A.filter(e=>kindOf(markOf(e,S.date))==="present"),sh=e=>{const r=shiftOn(e,S.date);return r==="NIGHT"?"night":r==="DAY"?"day":"off"},DL=deptList(A);let t="";
+     if(k==="off"&&!L.length)continue;sections.push({title:t+" ("+L.length+")",head:["Employee","Number","Department","Clocked"].concat(k==="off"?["Shift worked"]:[]),rows:L.length?L.map(e=>{const v=markOf(e,S.date),x=xsOf(e,S.date);return [e.name,e.number||"",deptOf(e),(isTime(v)||isHrs(v))?showMark(v):""].concat(k==="off"?[x==="DAY"?"Day shift":x==="NIGHT"?"Night shift":"Not chosen"]:[])}):[["Nobody marked present","","",""]]})}return sections}
+function onShiftText(keys){const A=activeEmps(),P=A.filter(e=>kindOf(markOf(e,S.date))==="present"),sh=e=>{const r=shiftOn(e,S.date);if(r==="NIGHT")return"night";if(r==="DAY")return"day";const x=xsOf(e,S.date);return !keys.includes("off")&&x?(x==="DAY"?"day":"night"):"off"},DL=deptList(A);let t="";
   for(const [k,lb] of [["day","Day shift present"],["night","Night shift present"],["off","Off by the rota but at work"]]){if(!keys.includes(k))continue;const L=P.filter(e=>sh(e)===k);if(k==="off"&&!L.length)continue;
-    t+="\n*"+lb+" ("+L.length+")*\n"+(L.length?DL.map(d=>{const es=L.filter(e=>deptOf(e)===d).sort((a,b)=>a.name.localeCompare(b.name));return es.length?"_"+d+"_ ("+es.length+")\n"+es.map(e=>"- "+e.name).join("\n")+"\n":""}).join(""):"Nobody present\n")}
+    t+="\n*"+lb+" ("+L.length+")*\n"+(L.length?DL.map(d=>{const es=L.filter(e=>deptOf(e)===d).sort((a,b)=>a.name.localeCompare(b.name));return es.length?"_"+d+"_ ("+es.length+")\n"+es.map(e=>"- "+e.name+(k==="off"&&xsOf(e,S.date)?" ("+(xsOf(e,S.date)==="DAY"?"day":"night")+" shift)":"")).join("\n")+"\n":""}).join(""):"Nobody present\n")}
   return t}
 function viewMark(){
   const list=filtered();const groups=bySheetGroup(list);const t=tally(list,[S.date]);const cd=rangeDates(cycleOf(S.date).start,S.date);
@@ -946,6 +947,7 @@ main.addEventListener("change",ev=>{if((ev.target.id==="flg-from"||ev.target.id=
   if((ev.target.id==="exp-from"||ev.target.id==="exp-to")&&ev.target.value){const E=S.exp;E.type="custom";E[ev.target.id==="exp-from"?"from":"to"]=ev.target.value;if(E.to<E.from)[E.from,E.to]=[E.to,E.from];if(rangeDates(E.from,E.to).length>=400){E.to=addDays(E.from,365);toast("A report covers at most one year")}render();return}
   if(ev.target.id==="f-sheet"){const sh=ev.target.value;const sel=$("f-group");const opt=[...sel.options].find(o=>o.dataset.sheet===sh);if(opt)sel.value=opt.value}});
 main.addEventListener("click",ev=>{const t=ev.target.closest("button");if(!t)return;
+  if(t.dataset.xs){if(!S.canWrite){toast("You can view this register but not mark it.");return}const [id,z]=t.dataset.xs.split("|"),e=(S.emps||[]).find(x=>x.id===id);if(!e)return;writeSheet(e.sheet,{[e.id]:{[S.date]:xsOf(e,S.date)===z?"":z}},"xs");toast(e.name+": "+(xsOf(e,S.date)?(z==="DAY"?"day":"night")+" shift":"shift cleared"));return}
   if(t.dataset.sheet){S.sheet=t.dataset.sheet;try{localStorage.setItem("tkr-att-sheet",S.sheet)}catch(e){}render();return}
   if(t.dataset.rota!==undefined){openRotaDay(t.dataset.rota);return}
   if(t.dataset.emp){const e=activeEmps().find(x=>x.id===t.dataset.emp);if(e)openPanel(e);return}
