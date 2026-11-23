@@ -584,7 +584,7 @@ function viewForms(){const c=cycleOf(S.date);loadForms(c);
   const L=FM.list,M=missingForms(c),T=FM.type,show=k=>!T||T===k;
   let h='<div class="bar" style="margin-bottom:10px"><button class="chip" data-fmt="" aria-pressed="'+(!T)+'">All</button>'+FORM_TYPES.map(([k,l])=>'<button class="chip" data-fmt="'+k+'" aria-pressed="'+(T===k)+'">'+l+'</button>').join("")+'</div>';
   h+='<div class="tiles">'+[["Forms received",L.filter(f=>show(f.type)).length],["Forms missing",M.filter(x=>show(x.code)).length]].map(([k,v])=>'<div class="tile"><span>'+k+'</span><b>'+v+'</b></div>').join("")+'</div>';
-  h+='<div class="bar"><button class="btn gold" id="fmPdf">Download PDF</button><button class="btn gold" id="fmXls">Download Excel</button>'+(canWrite()?'<button class="btn" id="fmAdd">'+(FM.open?"Close":"Add a received form")+'</button>':"")+'</div>';
+  h+='<div class="bar"><button class="btn gold" id="fmPdf">Download PDF</button><button class="btn gold" id="fmXls">Download Excel</button>'+(canWrite()?'<button class="btn" id="fmAdd">'+(FM.open?"Close":"Add a received form")+'</button><button class="btn" id="fmImp">Update from the Sick, overtime and leave Excel</button><input type="file" id="fmFile" accept=".xlsx,.xls" hidden>':"")+'</div>';
   if(FM.open&&canWrite())h+='<form id="formForm" class="list" autocomplete="off"><h3>Add a received form</h3><div class="grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px">'
     +'<label>Employee<input name="emp" list="fmEmps" required placeholder="Type a name or number"></label><datalist id="fmEmps">'+activeEmps().map(e=>'<option value="'+esc(e.name)+' · '+esc(e.number||"")+'">').join("")+'</datalist>'
     +'<label>Type<select name="type">'+FORM_TYPES.map(([k,l])=>'<option value="'+k+'">'+l+'</option>').join("")+'</select></label><label>From<input type="date" name="start" required></label><label>To<input type="date" name="end" required></label><label>Days<input name="days" inputmode="numeric"></label><label>Notes<input name="note"></label></div>'
@@ -595,10 +595,30 @@ function viewForms(){const c=cycleOf(S.date);loadForms(c);
   const MM=M.filter(x=>show(x.code));
   h+='<div class="list"><h3>Forms missing ('+MM.length+')</h3><p class="note" style="margin-top:0">Leave and sick days marked in the register this cycle with no received form covering them.</p>'+(MM.length?'<table class="tbl"><thead><tr><th>Employee</th><th>Type</th><th>Dates</th><th>Days</th></tr></thead><tbody>'+MM.map(x=>'<tr><td><b>'+esc(x.e.name)+'</b><br><span class="note">'+esc(x.e.number||"")+' · '+esc(x.e.sheet)+'</span></td><td>'+tName(x.code)+'</td><td>'+dRange(x.a,x.b)+'</td><td>'+x.n+'</td></tr>').join("")+'</tbody></table>':'<p class="none">No forms missing.</p>')+'</div></div>';
   main.innerHTML=h}
+/* reads the Sick, Overtime and Leave workbook: the received tables (sick notes received, leave forms received, family responsibility leave with proof received); the "on the timesheet" tables are left out */
+async function importFormsXlsx(file){const c=cycleOf(S.date);await loadJs("../lib/xlsx.full.min.js");
+  const wb=XLSX.read(await file.arrayBuffer(),{cellDates:true}),byNo=new Map(activeEmps().map(e=>[String(e.number||"").toUpperCase(),e])),add=[],bad=[];
+  const dt=v=>{if(v instanceof Date&&!isNaN(v))return iso(new Date(v.getFullYear(),v.getMonth(),v.getDate()+(v.getHours()>=12?1:0)));const m=String(v||"").trim().match(/^(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})$/);if(!m)return"";const d=new Date(+m[1],m[2]-1,+m[3]);return d.getMonth()===m[2]-1?iso(d):""};
+  for(const name of wb.SheetNames){const rows=XLSX.utils.sheet_to_json(wb.Sheets[name],{header:1,raw:true,defval:null});let sec="",H=null;
+    for(const r of rows){const cells=r.map(v=>v==null?"":String(v).trim().toUpperCase()),filled=cells.filter(Boolean);
+      if(filled.length===1&&!H){sec=filled[0];continue}
+      if(filled.length===1&&H){sec=filled[0];H=null;continue}
+      if(cells.includes("EMPLOYEE NO.")){const want=!/TIMESHEET/.test(sec)&&/RECEIVED|FAMILY RESPONSIBILITY LEAVE|STUDY/.test(sec);
+        const type=/SICK/.test(sec)?"SICK":/FAMILY/.test(sec)?"FAMILY RESPONSIBILITY":/STUDY/.test(sec)?"STUDY LEAVE":"ANNUAL LEAVE";
+        const ix=f=>cells.findIndex(f);H=want?{type,emp:cells.indexOf("EMPLOYEE"),no:cells.indexOf("EMPLOYEE NO."),from:ix(x=>x.includes("FROM")||x.includes("START")),to:ix(x=>x==="TO"||x.includes("TILL")||x.includes("END")),days:ix(x=>x.includes("DAYS")),ok:ix(x=>x.includes("RECEIVED")||x.includes("SUBMIT")),why:ix(x=>x.includes("NATURE"))}:null;continue}
+      if(!H||!filled.length)continue;const no=String(r[H.no]||"").trim().toUpperCase(),nm=String(r[H.emp]||"").trim();if(!no&&!nm)continue;
+      if(H.ok>=0&&!/^Y/i.test(String(r[H.ok]||"")))continue;
+      const st=dt(r[H.from]),en=H.to>=0?dt(r[H.to]):"",e=byNo.get(no);
+      const note=(H.why>=0&&r[H.why]?String(r[H.why]).trim():"")+(H.to>=0&&r[H.to]&&!en?(H.why>=0&&r[H.why]?" · ":"")+"End date on the form: "+String(r[H.to]).trim():"");
+      if(!st){bad.push(nm||no);continue}
+      add.push({id:"f_"+Math.random().toString(36).slice(2,9),empId:e?e.id:"",name:e?e.name:nm,number:no,type:H.type,start:st,end:en,days:H.days>=0&&r[H.days]!=null?String(r[H.days]):"",note,by:"Excel: "+file.name,at:Date.now()})}}
+  const L=FM.list||[];let n=0;for(const f of add){if(L.some(x=>x.number===f.number&&x.type===f.type&&x.start===f.start))continue;L.push(f);n++}
+  FM.list=L;await saveForms(c);render();toast(n+" new form"+(n===1?"":"s")+" added"+(add.length-n?", "+(add.length-n)+" already on the list":"")+(bad.length?". No start date for: "+bad.join(", "):""))}
 async function saveForms(c){await fdb.doc(formsDoc(c)).set({forms:FM.list,seed1:true})}
 main.addEventListener("click",async ev=>{const t=ev.target.closest("button");if(!t||S.view!=="forms")return;const c=cycleOf(S.date);
   if(t.dataset.fmt!==undefined){FM.type=t.dataset.fmt;render();return}
   if(t.id==="fmAdd"){FM.open=!FM.open;render();return}
+  if(t.id==="fmImp"){const inp=$("fmFile");inp.value="";inp.onchange=()=>{const f=inp.files[0];if(f)importFormsXlsx(f).catch(e=>toast("Couldn't read that file: "+(e.message||e)))};inp.click();return}
   if(t.id==="fmPdf"){pdfSpec(formsSpec(c),t,"Download PDF");return}
   if(t.id==="fmXls"){try{await loadJs("../lib/xlsx.full.min.js")}catch{}const sp=formsSpec(c),wb=XLSX.utils.book_new();for(const sec of sp.sections){const ws=XLSX.utils.aoa_to_sheet([[sec.title],[],sec.head,...sec.rows]);ws["!cols"]=sec.head.map((_,i)=>({wch:i?16:30}));XLSX.utils.book_append_sheet(wb,ws,sec.title.replace(/[\[\]\*\/\\\?:]/g,"").replace(/\s*\(.*\)$/,"").slice(0,31))}XLSX.writeFile(wb,sp.file+".xlsx");return}
   if(t.dataset.fmdel){if(!canWrite())return;if(!confirm("Remove this form from the list?"))return;FM.list=FM.list.filter(f=>f.id!==t.dataset.fmdel);try{await saveForms(c);toast("Removed")}catch(e){toast("Not saved: "+(e.message||e))}render();return}});
