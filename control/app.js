@@ -182,6 +182,8 @@ async function pinHash(name, pin) {
   catch { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) | 0; return "x" + h; }
 }
 const adminRec = () => R("admin").sort((a, b) => b.editedAt - a.editedAt)[0];
+const ADMINS = [{ id: "adm_muneer", name: "Muneer" }, { id: "adm_amogelang", name: "Amogelang" }];   // general admins: name and PIN, no password (23/11/2026)
+const admPin = id => byId(id + "_pin")?.pin || "";
 let adminStep = "";
 const okUser = u => !u.status || u.status === "approved";   // controllers added before 20/11/2026 stay approved
 const pendingUsers = () => R("user").filter(u => u.status === "pending");
@@ -191,7 +193,15 @@ function gateView() {
     + `<form id="fAdd" class="card" style="max-width:460px" autocomplete="off"><label>Name and surname <input name="name" required autocapitalize="words"></label>
       <label style="margin-top:10px;display:block">Choose a 4-digit PIN <input name="pin" class="pin" inputmode="numeric" maxlength="4" pattern="\\d{4}" type="text" autocomplete="one-time-code" style="-webkit-text-security:disc" required></label>
       <label style="margin-top:10px;display:block">Type the PIN again <input name="pin2" class="pin" inputmode="numeric" maxlength="4" pattern="\\d{4}" type="text" autocomplete="one-time-code" style="-webkit-text-security:disc" required></label>
-      <div class="row" style="margin-top:14px"><button class="primary" style="flex:1">Send to the admin</button>${users.length ? '<button type="button" class="ghost" id="cancelAdd">Back</button>' : ""}</div></form>`;
+      <div class="row" style="margin-top:14px"><button class="primary" style="flex:1">Send to the admin</button>${users.length ? '<button type="button" class="ghost" id="cancelAdd">Back</button>' : ""}</div></form>`
+      + (users.length ? "" : `<p style="margin-top:22px"><button class="ghost sm" id="adminIn">Admin</button></p>`);
+  if (adminStep === "pick") return pageHead("Control Room", "Admin", "", "", "Tap your name.")
+    + `<div class="who-pick">${ADMINS.map(a => `<button data-adm="${a.id}"><b>${a.name}</b><small>${admPin(a.id) ? "admin" : "first time: choose your PIN"}</small></button>`).join("")}</div><div class="row" style="margin-top:14px"><button type="button" class="ghost" id="cancelAdm">Back</button></div>`;
+  if (adminStep.startsWith("a:")) { const a = ADMINS.find(x => x.id === adminStep.slice(2)), set = !admPin(a.id);
+    return pageHead("Control Room", `${a.name} – admin`, "", "", set ? "Choose a 4-digit admin PIN and type it twice. Keep it to yourself." : "Type your admin PIN. Forgot it? The other admin can reset it under Requests.")
+      + `<form id="fAdm2" data-id="${a.id}" class="card" style="max-width:360px" autocomplete="off"><input name="pin" class="pin" inputmode="numeric" maxlength="4" type="text" autocomplete="one-time-code" style="-webkit-text-security:disc" required placeholder="${set ? "New PIN" : "PIN"}">
+        ${set ? `<input name="pin2" class="pin" inputmode="numeric" maxlength="4" type="text" autocomplete="one-time-code" style="-webkit-text-security:disc;margin-top:10px" required placeholder="Again">` : ""}
+        <div class="row" style="margin-top:14px"><button class="primary" style="flex:1">Open as admin</button><button type="button" class="ghost" id="cancelAdm">Back</button></div><p class="flag" id="pinErr"></p></form>`; }
   if (adminStep === "pin") { const a = adminRec();
     return pageHead("Control Room", "Admin", "", "", "Type your admin PIN. No signal needed.")
       + `<form id="fAdmPin" class="card" style="max-width:360px" autocomplete="off"><input name="pin" class="pin" inputmode="numeric" maxlength="4" type="text" autocomplete="one-time-code" style="-webkit-text-security:disc" required>
@@ -953,10 +963,11 @@ async function decide(id, ok) {
 }
 function reqView() {
   const PU = pendingUsers(), puCard = !PU.length ? "" : `<section class="card" style="border:2px solid var(--gold)"><h2>New controllers waiting (${PU.length})</h2><div class="res">${PU.map(u => `<div class="ri"><div class="rt"><b>${esc(u.name)}</b><small>asked ${fmt(ymd(new Date(u.addedAt)))} ${tOf(u.addedAt)}</small></div>${me.admin ? `<div class="row" style="gap:6px"><button class="sm primary" data-uok="${u.id}">Approve</button><button class="sm danger" data-uno="${u.id}">Decline</button></div>` : '<span class="muted">waiting for the admin</span>'}</div>`).join("")}</div></section>`;
+  const admCard = !me.admin ? "" : `<section class="card"><h2>Admin PINs</h2><div class="res">${ADMINS.filter(a => a.id !== me.id).map(a => `<div class="ri"><div class="rt"><b>${a.name}</b><small>${admPin(a.id) ? "PIN set" : "no PIN yet – chooses one at first sign-in"}</small></div>${admPin(a.id) ? `<button class="sm ghost" data-admreset="${a.id}">Reset PIN</button>` : ""}</div>`).join("")}</div></section>`;
   const Q = R("req").sort((a, b) => (a.status === "pending" ? 0 : 1) - (b.status === "pending" ? 0 : 1) || b.askedAt - a.askedAt), P = Q.filter(q => q.status === "pending");
   const when = t => `${fmt(ymd(new Date(t))).slice(0, 5)} ${new Date(t).toTimeString().slice(0, 5)}`;
   return pageHead("Control room", "Change requests", `${P.length} waiting`, "", me.admin ? "Changes asked for entries from an earlier shift. Approve makes the change; decline leaves it as it is." : "Grey boxes were filled in on an earlier shift and are locked. Tap a grey box to ask the admin to change it.")
-    + puCard + `<div class="res">${Q.map(q => `<div class="ri" style="flex-wrap:wrap"><div class="rt"><b>${esc(q.what)}</b><small>${esc(q.fromTxt)} → <b>${esc(q.toTxt)}</b></small><small>Why: ${esc(q.why)}</small><small class="muted">asked by ${esc(q.askedBy)} ${when(q.askedAt)}${q.decidedBy ? ` · ${q.status} by ${esc(q.decidedBy)} ${when(q.decidedAt)}` : ""}</small></div>
+    + puCard + admCard + `<div class="res">${Q.map(q => `<div class="ri" style="flex-wrap:wrap"><div class="rt"><b>${esc(q.what)}</b><small>${esc(q.fromTxt)} → <b>${esc(q.toTxt)}</b></small><small>Why: ${esc(q.why)}</small><small class="muted">asked by ${esc(q.askedBy)} ${when(q.askedAt)}${q.decidedBy ? ` · ${q.status} by ${esc(q.decidedBy)} ${when(q.decidedAt)}` : ""}</small></div>
       ${q.status === "pending" ? (me.admin ? `<div class="row" style="gap:6px"><button class="sm primary" data-appr="${q.id}">Approve</button><button class="sm danger" data-decl="${q.id}">Decline</button></div>` : '<span class="tag SB">WAITING</span>') : `<span class="tag ${q.status === "approved" ? "OP" : "BD"}">${q.status.toUpperCase()}</span>`}</div>`).join("") || '<p class="muted">No change requests.</p>'}</div>`;
 }
 
@@ -1223,7 +1234,9 @@ async function clickH(ev) {
   if (b.id === "cancelPin") { pinFor = null; render(); return; }
   if (b.dataset.who) { pinFor = b.dataset.who; render(); setTimeout(() => app.querySelector("input[name=pin]")?.focus(), 50); return; }
   if (b.hasAttribute("data-logout")) { logout(b.dataset.logout === "swap"); return; }
-  if (b.id === "adminIn") { adminStep = adminRec() ? "pin" : "email"; render(); return; }
+  if (b.id === "adminIn") { adminStep = "pick"; render(); return; }
+  if (b.dataset.adm) { adminStep = "a:" + b.dataset.adm; render(); return; }
+  if (b.dataset.admreset) { if (!me?.admin) return; const id = b.dataset.admreset, r = byId(id + "_pin"); if (r) await put({ ...r, pin: "" }, `Admin PIN reset for ${ADMINS.find(a => a.id === id)?.name}`); render(); toast("Done. They choose a new PIN the next time they sign in."); return; }
   if (b.id === "cancelAdm") { adminStep = ""; render(); return; }
   if (b.id === "admReset") { adminStep = "email"; render(); return; }
   if (b.dataset.appr || b.dataset.decl) { b.disabled = true; await decide(b.dataset.appr || b.dataset.decl, !!b.dataset.appr); return; }
@@ -1306,6 +1319,11 @@ async function submitH(ev) {
       await startSession({ id: a.id, name: a.name, admin: true }); adminStep = ""; tab = "req"; render(); toast("Signed in as admin. Next time your PIN is enough."); }
     catch (x) { console.warn(x); const c = String(x?.code || ""), msg = c.includes("too-many-requests") ? "Too many tries – Firebase has paused sign-in for a few minutes. Wait, or tap Forgot password." : c.includes("network") ? "No signal reached the TKR app. Try again with signal." : c.includes("invalid-email") ? "That email isn't right. Use muneer@tkroperations.com." : "The email or password is wrong. Use muneer@tkroperations.com and your TKR app password, or tap Forgot password.";
       if ($("admErr")) $("admErr").textContent = msg; toast(msg); } return; }
+  if (f.id === "fAdm2") { const id = f.dataset.id, a = ADMINS.find(x => x.id === id), p = f.elements.pin.value; if (!/^\d{4}$/.test(p)) { $("pinErr").textContent = "The PIN must be 4 numbers."; return; }
+    const h = await pinHash("admin2|" + id, p), cur = admPin(id);
+    if (!cur) { if (p !== f.elements.pin2.value) { $("pinErr").textContent = "The two PINs are not the same."; return; } await put({ id: id + "_pin", kind: "admin2", ym: "setup", name: a.name, pin: h }, `${a.name} set an admin PIN`); }
+    else if (cur !== h) { $("pinErr").textContent = "Wrong PIN. Try again."; f.elements.pin.value = ""; f.elements.pin.focus(); return; }
+    await startSession({ id, name: a.name + " (admin)", admin: true }); adminStep = ""; tab = "req"; render(); return; }
   if (f.id === "fAdmPin") { const a = adminRec(); if (a && a.pin === await pinHash("admin|" + a.email, f.elements.pin.value)) { await startSession({ id: a.id, name: a.name, admin: true }); adminStep = ""; tab = "req"; render(); }
     else { $("pinErr").textContent = "Wrong PIN. Try again."; f.elements.pin.value = ""; f.elements.pin.focus(); } return; }
   if (f.id === "fMailTo") { const v = cleanMails(f.elements.to.value); const u = recs.find(r => r.id === me.id); if (u) await put({ ...u, mailTo: v }); me.mailTo = v; askMail = false; render(); toast(v ? "Saved. Breakdowns can be emailed to " + v + "." : "Saved."); return; }
@@ -1697,7 +1715,7 @@ async function checkClock() { try { const r = await fetch(location.href.split("#
   try { await closeCarried(); } catch (e) { console.warn(e); }
   try { undo = (await metaGet("undo")) || []; } catch { undo = []; }
   const s = await metaGet("me");
-  if (s && s.until > Date.now()) { const u = s.admin ? R("admin").find(a => a.id === s.id) : R("user").find(u => u.id === s.id);
+  if (s && s.until > Date.now()) { const u = s.admin ? (ADMINS.find(a => a.id === s.id) ? { id: s.id, name: ADMINS.find(a => a.id === s.id).name + " (admin)" } : R("admin").find(a => a.id === s.id)) : R("user").find(u => u.id === s.id);
     if (u) { me = { ...u, admin: !!s.admin, sid: s.sid || "s_" + uid(), start: s.start || s.until - 14 * 36e5 }; if (!s.sid) await metaSet("me", { ...s, sid: me.sid, start: me.start });
       const x = dutyLive(); if (x && x.sid !== me.sid) dutyCheck(); else await setDuty(true); } }
   try { navigator.storage?.persist?.(); } catch {}
