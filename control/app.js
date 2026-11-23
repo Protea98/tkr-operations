@@ -477,6 +477,10 @@ function exportView() {
     + syncCard()
     + `<section class="card"><h2>Backup</h2><p class="muted" style="margin-top:0">Only needed if this PC never gets signal: save a backup file and load it on another PC.</p><div class="row"><button id="bk">Save a backup file</button><label class="btn" style="display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:10px;padding:8px 14px;cursor:pointer">Load a backup <input type="file" id="rs" accept=".json" hidden></label></div></section>`;
 }
+function pmCard() { const P0 = pmRec() || {}, M = fleet().flatMap(([, L]) => L);
+  return `<section class="card"><h2>Next maintenance</h2><p class="muted" style="margin-top:0">Type the hour meter reading each machine's next maintenance is due at. The reports show the hours left (due reading minus the latest closing hours). Leave a box empty and the reports show a hyphen.</p>
+    <form id="fPM" autocomplete="off"><div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px">${M.map(mc => `<label>${esc(mc)} <input name="p_${esc(mc)}" inputmode="decimal" value="${P0.at?.[mc] ?? ""}" placeholder="due at"><small class="muted">now: ${lastMeter(mc, today()) ?? "–"} · left: ${pmText(mc)}</small></label>`).join("")}</div>
+      <div class="row" style="margin-top:12px"><button class="primary">Save</button></div></form></section>`; }
 function targetsCard() { const T0 = tgtRec() || {}, cur = today().slice(0, 7), M = fleet();
   return `<section class="card"><h2>Targets</h2><p class="muted" style="margin-top:0">Set by the admin. The shift message shows progress, what is still needed per month and per shift, and an action plan. Leave a box empty for no target.</p>
     <form id="fTgt" autocomplete="off"><div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px">
@@ -490,7 +494,7 @@ function settingsView() {
   return pageHead("Settings", "Machines and controllers", "", "", "Changes here go to every control room device with the next sync. You can also add or remove a machine on the live board.")
     + `<section class="card"><h2>Machines</h2>${F.map(([g, L], gi) => `<div style="margin-bottom:12px"><b>${esc(g)}</b><div class="row" style="margin-top:6px">${L.map(m => `<span class="tag" style="font-size:13px;padding:4px 10px">${esc(m)} <button class="sm ghost" data-rmm="${gi}|${esc(m)}" style="min-height:28px;padding:0 6px">×</button></span>`).join("")}</div>
       <div class="row" style="margin-top:6px"><input data-newm="${gi}" placeholder="Add a machine to ${esc(g)}" style="max-width:260px"><button class="sm" data-addm="${gi}">+ Add</button></div></div>`).join("")}</section>
-    ${me.admin ? targetsCard() : ""}
+    ${me.admin ? targetsCard() + pmCard() : ""}
     <section class="card"><h2>Controllers</h2><div class="res">${users.filter(u => u.status !== "declined").map(u => `<div class="ri"><div class="rt"><b>${esc(u.name)}</b><small>${u.status === "pending" ? '<span style="color:var(--gold);font-weight:600">waiting for the admin to approve</span>' : "added " + fmt(ymd(new Date(u.addedAt || u.editedAt)))}</small></div><div class="row" style="gap:6px">${u.status === "pending" && me.admin ? `<button class="sm primary" data-uok="${u.id}">Approve</button><button class="sm danger" data-uno="${u.id}">Decline</button>` : `${me.admin && u.id !== me.id ? `<button class="sm" data-rpin="${u.id}">Reset PIN</button>` : ""}${u.id === me.id || me.admin ? `<button class="sm danger" data-rmu="${u.id}">${u.id === me.id ? "Remove me" : "Remove"}</button>` : ""}`}</div></div>`).join("")}</div></section>`;
 }
 
@@ -591,6 +595,13 @@ function daySum(mc, d) {
 }
 /* hour meter: opening and closing hours per machine per shift */
 const meterOf = (d, mc, sh) => recs.find(r => r.id === `hr_${d}_${mc}` && !r.deleted)?.meter?.[sh] || {};
+/* hours to next maintenance: the hour meter reading the next maintenance is due at (set by the admin) minus the latest closing reading */
+const pmRec = () => recs.find(r => r.id === "pmnext" && !r.deleted) || null;
+function lastMeter(mc, upTo) { let best = null; for (const r of recs) { if (r.kind !== "hr" || r.deleted || r.machine !== mc || r.date > upTo) continue;
+    for (const sh of ["Day", "Night"]) { const M = r.meter?.[sh] || {}, v = M.close !== undefined && M.close !== "" ? +M.close : M.open !== undefined && M.open !== "" ? +M.open : null;
+      if (v != null && !isNaN(v)) { const k = r.date + (sh === "Night" ? "2" : "1"); if (!best || k > best.k) best = { k, v }; } } } return best ? best.v : null; }
+function toNextPM(mc, upTo = today()) { const at = pmRec()?.at?.[mc]; if (at === undefined || at === "" || at === null) return null; const m0 = lastMeter(mc, upTo); return m0 == null ? null : +at - m0; }
+const pmText = (mc, upTo) => { const v = toNextPM(mc, upTo); return v == null ? "-" : v < 0 ? `overdue by ${hm(-v)} h` : `${hm(v)} h`; };
 const prevShift = (d, sh) => sh === "Day" ? [addDays(d, -1), "Night"] : [d, "Day"];
 function lastClose(d, mc, sh) { let [d2, s2] = prevShift(d, sh); for (let i = 0; i < 60; i++) { const m = meterOf(d2, mc, s2); if (m.close != null && m.close !== "") return +m.close; if (m.open != null && m.open !== "") return null; [d2, s2] = prevShift(d2, s2); } return null; }
 const meterHrs = m => m.open !== undefined && m.open !== "" && m.close !== undefined && m.close !== "" && +m.close >= +m.open ? +m.close - +m.open : null;
@@ -740,7 +751,10 @@ function shiftMessage(d, sh, short = false) {   // simple: every machine, its st
       ...(tm.length ? ["", "*Target*", ...tm] : []),
       ...(ap.length ? ["", "*Action plan*", ...ap] : []),
       "", "Full detail: https://protea98.github.io/tkr-operations/control/"].join("\n").trim(); }
-  return [`*TKR Control Room – ${sh} shift ${dow(d)} ${fmt(d)}*`, `Controller: ${ctl}`, `Status at ${tOf(cur ? now : Math.min(b, now))}`, "", ...head, "", "*Status per machine*", ...body, "", "Live dashboard (no sign-in needed):", "https://protea98.github.io/tkr-operations/control/"].join("\n").trim();
+  const bdSum = fleet().flatMap(([, M]) => M).filter(mc => !offShift(mc, d, sh)).map(mc => ({ mc, s: shiftSum(mc, d, sh), w: why(mc) })).filter(x => x.s.down > 0);   // breakdown hours this shift and why
+  const daily = ["", "*Breakdown hours this shift*", ...(bdSum.length ? bdSum.map(x => `${x.mc} – ${hm(x.s.down)} h${x.s.BD && x.s.PM ? ` (breakdown ${hm(x.s.BD)} h, maintenance ${hm(x.s.PM)} h)` : x.s.PM ? " maintenance" : " breakdown"}${x.w ? ": " + x.w : ""}`) : ["None"]),
+    "", "*Hours to next maintenance*", ...fleet().map(([g, M]) => `${g}: ${M.map(mc => `${mc} ${pmText(mc, d)}`).join(" · ")}`)];
+  return [`*TKR Control Room – ${sh} shift ${dow(d)} ${fmt(d)}*`, `Controller: ${ctl}`, `Status at ${tOf(cur ? now : Math.min(b, now))}`, "", ...head, "", "*Status per machine*", ...body, ...daily, "", "Live dashboard (no sign-in needed):", "https://protea98.github.io/tkr-operations/control/"].join("\n").trim();
 }
 /* the status picture: the dashboard summed up in one JPEG for WhatsApp (status right now) */
 async function statusPicture() {
@@ -788,7 +802,7 @@ async function statusPicture() {
     const h0 = sc ? (now - sc) / 36e5 : 0, out = sc ? (h0 >= 48 ? `out ${Math.floor(h0 / 24)} days` : `out ${hm(h0)} h`) : "";
     const head = `${LBL[t] || t}${sc ? " since " + (ymd(new Date(sc)) !== today() ? fmt(ymd(new Date(sc))).slice(0, 5) : tOf(sc)) : ""}${out ? " · " + out : ""}`;
     font(400, 13); const WL = why ? wrap(why, SW - 12, 3) : [], plan = dn ? [e?.action, e?.owner && "by " + e.owner, e?.eta ? "back " + fmt(e.eta) : "ETA to be confirmed"].filter(Boolean).join(" · ") : "";
-    const PL = plan ? wrap(plan, SW - 12, 2) : []; return { t, head, WL, PL, h: Math.max(RH, 30 + (WL.length + PL.length) * 17 + 6) }; };
+    const PL = plan ? wrap(plan, SW - 12, 2) : []; return { t, head, WL, PL, h: Math.max(RH + 8, 30 + (WL.length + PL.length) * 17 + 6) }; };
   for (const g of groups) { const on = g.L.filter(m => !offNow(m)), wk = on.filter(m => ["OP", "SB"].includes(st(m))).length, RI = g.L.map(rowInfo), gh = RI.reduce((a2, r) => a2 + r.h, 0);
     box(P - 14, y, W - (P - 14) * 2, 40 + gh + 2, 12, T.panel, T.line); y += 4;   // each group in its own box: heading and its machines together
     font(700, 13); x.fillStyle = T.gold; x.fillText(g.g.toUpperCase().split("").join(String.fromCharCode(8202)), P, y + 22); const gw = x.measureText(g.g.toUpperCase().split("").join(String.fromCharCode(8202))).width;
@@ -796,7 +810,7 @@ async function statusPicture() {
     if (g === groups[0]) { font(500, 12); x.fillStyle = T.muted; HRL.forEach((h, k) => { const l = pad(h % 24); x.fillText(l, HX + k * (HW + HG) + (HW - x.measureText(l).width) / 2, y + 22); }); }
     x.fillStyle = T.line; x.fillRect(P, y + 32, W - P * 2, 1); y += 36;
     g.L.forEach((m, i) => { const r = RI[i], Y = y, t = r.t; if (i) { x.fillStyle = "#222826"; x.fillRect(P, Y, W - P * 2, 1); }
-      font(700, 17); x.fillStyle = T.fg; x.fillText(m, P, Y + 26);
+      font(700, 17); x.fillStyle = T.fg; x.fillText(m, P, Y + 26); font(400, 11.5); x.fillStyle = T.muted; x.fillText(fit("Next maint.: " + pmText(m), NW - 8), P, Y + 42);   // hours to next maintenance, a hyphen until it is set
       font(500, 14); x.fillStyle = t === "OP" ? T.ok : t === "BD" ? T.bad : t === "PM" ? T.pm : t === "SB" ? T.sb : T.muted; x.fillText(fit(r.head, SW - 12), P + NW, Y + 24);
       let ly = Y + 24; font(400, 13); x.fillStyle = "#d8d3c4"; for (const ln of r.WL) { ly += 17; x.fillText(ln, P + NW, ly); }
       x.fillStyle = T.muted; for (const ln of r.PL) { ly += 17; x.fillText(ln, P + NW, ly); }
@@ -1339,6 +1353,8 @@ async function submitH(ev) {
     await addReq({ target: t, what: x.what, fromTxt: x.now || "empty", toTxt: to || "empty", to, why }); return; }
   if (f.id === "fMach") { const gi = +f.dataset.gi, v = f.elements.m.value;
     if (f.dataset.mode === "add") { if (await addMachine(gi, v)) { closeEv(); render(); } } else { if (!confirm(`Take ${v} off the list? Its logged times are kept.`)) return; await removeMachine(v); closeEv(); render(); toast(v + " removed."); } return; }
+  if (f.id === "fPM") { if (!me?.admin) return; const at = {}; for (const mc of fleet().flatMap(([, L]) => L)) { const v = f.elements["p_" + mc]?.value.trim().replace(",", "."); if (v) { if (isNaN(+v)) { toast(`${mc}: type a number`); return; } at[mc] = +v; } }
+    await put({ ...(pmRec() || {}), id: "pmnext", kind: "pmnext", ym: "setup", at }, "Next maintenance readings saved"); toast("Saved."); render(); return; }
   if (f.id === "fTgt") { if (!me?.admin) return; const g = k => f.elements[k].value.trim(), from = g("from"), to = g("to"); if (to < from) { toast("The To month must be after the From month."); return; }
     const hrs = {}; for (const el of f.querySelectorAll("input[name^=h_]")) { const v = parseFloat(el.value.replace(",", ".")); if (v > 0) hrs[el.name.slice(2)] = v; }
     const old = tgtRec(), metres = parseFloat(g("metres").replace(/\s/g, "").replace(",", ".")) || 0;
@@ -1679,6 +1695,13 @@ async function exportXlsx(from, to) {
           [...new Set([...E.map(e => e.reason), recs.find(x => x.id === `hr_${d}_${mc}` && !x.deleted)?.notes?.[sh]].filter(Boolean))].join("; "),
           s.filled ? s.avail : "", s.filled || s.BD ? s.BD : "", s.filled || s.PM ? s.PM : "", s.filled || s.down ? s.down : ""], { boldCol: [0, 1], left: [19], fmt: { 2: "0.0", 3: "0.0" } }); });
     }
+    r++; band(ws, r++, 21, "Breakdown summary for the day (06:00 to 06:00)"); head(ws, r++, ["Group", "Machine", "Breakdown (h:mm)", "Planned maint. (h:mm)", "Down (h:mm)", "Reasons", "", "", "", "", "", "", "Hours to next maintenance"]);
+    { const [a0] = shiftWin(d, "Day"), [, b0] = shiftWin(d, "Night"); let tB = 0, tP = 0, tD = 0;
+      for (const [g, L] of fleet()) L.forEach((mc, i) => { const s = daySum(mc, d) || { BD: 0, PM: 0, down: 0 }, hrR = recs.find(x => x.id === `hr_${d}_${mc}` && !x.deleted);
+        const why = [...new Set([...downEvs(mc).filter(e => toMs(e.start) < b0 && evEnd(e) > a0).map(e => (e.reason || "").trim()), (hrR?.notes?.Day || "").trim(), (hrR?.notes?.Night || "").trim()].filter(Boolean))].join("; ");
+        tB += s.BD; tP += s.PM; tD += s.down;
+        row(ws, r, [i ? "" : g, mc, s.BD || "", s.PM || "", s.down || "", why, "", "", "", "", "", "", pmText(mc, d)], { boldCol: [0, 1], left: [5], wrap: true }); ws.mergeCells(r, 6, r, 12); r++; });
+      row(ws, r, ["Total", "", tB || "", tP || "", tD || "", "Machine hours added together", "", "", "", "", "", "", ""], { bold: true, fill: "FFFFF2CC", left: [5] }); ws.mergeCells(r, 6, r, 12); r++; }
     r++; band(ws, r++, 21, "24-hour availability summary per machine"); head(ws, r++, ["Group", "Machine", "Available (h:mm)", "Breakdown (h:mm)", "Planned maint. (h:mm)", "Down (h:mm)", "Total (h:mm)", "Availability %"]);
     for (const [g, L] of fleet()) L.forEach((mc, i) => { const s = daySum(mc, d); row(ws, r, [i ? "" : g, mc, ...(s ? [s.avail, s.BD, s.PM, s.down, s.avail + s.down, s.pct ?? ""] : ["", "", "", "", "", ""])], { boldCol: [0, 1] , pct: [8 - 1] }); ws.getCell(r, 8).numFmt = "0%"; r++; });
     r++; band(ws, r++, 21, "Hourly update log"); head(ws, r++, ["Hour", "Updated", "Time done", "Controller", "Notes"]);
