@@ -294,22 +294,26 @@ async function pdfTimesheet(){const btn=$("pdfSheet");btn.disabled=true;btn.text
   try{await loadJs("../lib/jspdf.umd.min.js");await loadJs("../lib/jspdf.plugin.autotable.min.js");
     const c=cycleOf(S.date),upto=c.dates.filter(d=>d<=S.date),es=cycleRows().map(r=>r.e),logo=await logoData(),{jsPDF}=window.jspdf,P=new jsPDF({orientation:"landscape",unit:"mm",format:"a4"}),W=297,GOLD=[212,161,42],BLACK=[17,17,17];
     if(!es.length){toast("Nobody to put on the timesheet.");return}
+    const TSC={"AWOP":["C00000",1],"TRAINING":["9BC2E6"],"SOOSAN TRAINING":["9BC2E6"],"STUDY LEAVE":["C6E0B4"],"MEDICAL":["FFC000"],"FAMILY RESPONSIBILITY":["FFE699"],"INDUCTION":["BDD7EE"],"FAMILY EMERGENCY":["FF6600",1],"ANNUAL LEAVE":["92D050"],"SICK":["FFFF00"]};   // the timesheet colour keys
+    const rgb=h=>[0,2,4].map(k=>parseInt(h.slice(k,k+2),16)),colOf=v=>{const c=TSC[String(v||"").toUpperCase()];return c?{fillColor:rgb(c[0]),textColor:c[1]?[255,255,255]:[17,17,17],fontStyle:"bold"}:{}};
     const used={};const ab=v=>{if(!v)return"";if(isTime(v)||isHrs(v))return showMark(v);const t=String(showMark(v)).toUpperCase();if(t.length<=4)return t;const a=t.split(/[\s\/-]+/).filter(Boolean).map(w=>w[0]).join("").slice(0,4);used[a]=t;return a};
     const parts=[c.dates];   // landscape: the whole cycle in one table
     const sheetLbl=S.sheet&&S.sheet!=="All"?S.sheet:"All sheets";
     const head=sh=>{P.setFillColor(...BLACK);P.rect(0,0,W,24,"F");P.setFillColor(...GOLD);P.rect(0,24,W,1.4,"F");if(logo)P.addImage(logo,"PNG",10,3.5,17,17);
       P.setTextColor(255,255,255);P.setFont("helvetica","bold");P.setFontSize(14);P.text("TKR OPERATIONS – TIMESHEET",32,11);
-      P.setTextColor(...GOLD);P.setFontSize(10);P.text(sh+"   ·   Cycle "+short(c.start)+" "+yr(c.start)+" to "+short(c.end)+" "+yr(c.end),32,18.5,{maxWidth:W-40})};
+      P.setTextColor(...GOLD);P.setFontSize(10);P.text(sh+"   ·   Cycle "+short(c.start)+" "+yr(c.start)+" to "+short(c.end)+" "+yr(c.end),32,18.5,{maxWidth:W-40});
+      const KEY=[["AWOP","AWOP"],["TRAINING","Training"],["STUDY LEAVE","Study leave"],["MEDICAL","Medical"],["FAMILY RESPONSIBILITY","Family responsibility"],["INDUCTION","Induction"],["FAMILY EMERGENCY","Family emergency"],["ANNUAL LEAVE","Annual leave"],["SICK","Sick"]];
+      let kx=W-12-KEY.length*26.5;P.setFontSize(5.6);KEY.forEach(([k,l])=>{const c=TSC[k];P.setFillColor(...rgb(c[0]));P.setDrawColor(60);P.rect(kx,27,25.5,4.6,"FD");P.setTextColor(...(c[1]?[255,255,255]:[17,17,17]));P.setFont("helvetica","bold");P.text(l,kx+12.75,30.1,{align:"center"});kx+=26.5})};
     let first=true;
-    for(const S1 of bySheetGroup(es)){if(!first)P.addPage();first=false;head(S1.sheet);let y=32;
+    for(const S1 of bySheetGroup(es)){if(!first)P.addPage();first=false;head(S1.sheet);let y=37;
       for(const [pi,ds] of parts.entries()){const last=pi===parts.length-1;
         const hd=["Employee"].concat(ds.map(d=>String(parse(d).getDate())),last?["Pres.","Exc.","Att."]:[]);
         const body=[];for(const g of S1.groups){body.push([{content:g.label,styles:{fontStyle:"bold",fillColor:[255,242,204]}}].concat(ds.map(d=>{const r=rotaFor(g.id,d);return {content:r?r[0]:"",styles:{fillColor:[255,242,204],textColor:[120,100,60]}}}),last?[{content:"",colSpan:3,styles:{fillColor:[255,242,204]}}]:[]));
-          for(const e of g.emps){const t=tally([e],upto),pc=pct(t.present,t.exc);body.push([e.name].concat(ds.map(d=>ab(markOf(e,d))),last?[t.present,t.exc,pc==null?"–":Math.round(pc)+"%"]:[]))}}
+          for(const e of g.emps){const t=tally([e],upto),pc=pct(t.present,t.exc);body.push([e.name].concat(ds.map(d=>{const v=markOf(e,d);return {content:ab(v),styles:colOf(v)}}),last?[t.present,t.exc,pc==null?"–":Math.round(pc)+"%"]:[]))}}
         P.setTextColor(...BLACK);P.setFont("helvetica","bold");P.setFontSize(10);P.text(short(ds[0])+" – "+short(ds[ds.length-1]),12,y);
-        P.autoTable({startY:y+2,head:[hd],body,margin:{left:12,right:12,top:30},theme:"grid",styles:{fontSize:5,cellPadding:0.35,minCellHeight:4.6,valign:"middle",halign:"center",textColor:BLACK,lineColor:[217,211,197],overflow:"linebreak"},
+        P.autoTable({startY:y+2,head:[hd],body,margin:{left:12,right:12,top:35},theme:"grid",styles:{fontSize:5,cellPadding:0.35,minCellHeight:4.6,valign:"middle",halign:"center",textColor:BLACK,lineColor:[217,211,197],overflow:"linebreak"},
           columnStyles:(()=>{const cs={0:{halign:"left",cellWidth:38,fontSize:6.4}},dw=(W-24-38-(last?28:0))/ds.length;ds.forEach((d,k)=>cs[k+1]={cellWidth:dw});if(last){cs[ds.length+1]={cellWidth:9};cs[ds.length+2]={cellWidth:9};cs[ds.length+3]={cellWidth:10}}return cs})(),headStyles:{fillColor:[38,38,38],textColor:255,fontStyle:"bold"},didDrawPage:()=>head(S1.sheet)});
-        y=P.lastAutoTable.finalY+9;if(y>170&&!last){P.addPage();head(S1.sheet);y=32}}}
+        y=P.lastAutoTable.finalY+9;if(y>170&&!last){P.addPage();head(S1.sheet);y=37}}}
     const key=Object.entries(used).map(([a,t])=>a+" = "+t.toLowerCase()).join("   ·   ");
     const n=P.getNumberOfPages();for(let i=1;i<=n;i++){P.setPage(i);P.setFontSize(7);P.setTextColor(120);P.setFont("helvetica","normal");
       P.text((key?key+"   ·   ":"")+"Group rows: D day, N night, O off.   Att. = present ÷ (present + AWOP, sick and maternity days), to "+short(upto[upto.length-1]||c.start)+".   Printed "+nice(iso(new Date()))+" "+yr(iso(new Date()))+"   ·   page "+i+" of "+n,12,203,{maxWidth:W-24})}
