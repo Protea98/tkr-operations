@@ -153,7 +153,7 @@ function render(){
   if(!activeEmps().length&&S.view!=="people"&&S.view!=="users"&&S.view!=="groups"){main.innerHTML=isAdmin()?'<div class="empty"><b>No employees yet</b>Load the TKR Attendance data file to bring in your employees, shift rotas and marks.<div class="bar" style="justify-content:center;margin-top:14px"><button class="btn gold" id="emptyLoad">Load data file</button></div><p class="note" id="uMsg" role="status"></p><input type="file" id="dataIn" accept=".json,application/json" hidden></div>':'<div class="empty"><b>No employees yet</b>Ask admin to load the register.</div>';
     if(isAdmin()){$("emptyLoad").onclick=()=>$("dataIn").click();$("dataIn").onchange=ev=>{const f=ev.target.files[0];if(!f)return;const rd=new FileReader();rd.onload=()=>{try{loadBackup(JSON.parse(rd.result))}catch(e){toast("That file is not a TKR Attendance data file")}};rd.readAsText(f);ev.target.value=""}}
     return}
-  ({dash:viewDash,history:viewHistory,mark:viewMark,daily:viewDaily,cycle:viewCycle,export:viewExport,flags:viewFlags,people:viewPeople,groups:viewGroups,users:viewUsers}[S.view]||viewMark)();
+  ({dash:viewDash,history:viewHistory,mark:viewMark,daily:viewDaily,cycle:viewCycle,export:viewExport,flags:viewFlags,forms:viewForms,people:viewPeople,groups:viewGroups,users:viewUsers}[S.view]||viewMark)();
 }
 
 /* ---------- history of new, removed, returned and moved employees ---------- */
@@ -548,6 +548,65 @@ async function keepDup(keepId,ids){if(!S.canWrite){toast("You can view this regi
   const aliases=[...new Set((keep.aliases||[]).concat(drop.map(d=>d.name)).filter(n=>n&&n!==keep.name))],nums=[...new Set((keep.altNumbers||[]).concat(drop.map(d=>d.number)).filter(n=>n&&n!==keep.number))];
   const list=L.filter(e=>!drop.some(d=>d.id===e.id)).map(e=>e.id===keep.id?Object.assign({},e,{aliases,altNumbers:nums,number:e.number||nums[0]||"",title:e.title||drop.map(d=>d.title).find(Boolean)||"",dept:e.dept||drop.map(d=>d.dept).find(Boolean)||""}):e);
   await saveEmps(list);toast(drop.length+" duplicate"+(drop.length>1?"s":"")+" taken off"+(moved?", "+moved+" marked days moved onto "+keep.name:"")+".")}
+/* ---------- leave and sick forms: received forms per cycle, and the leave / sick days in the register that have no form yet ---------- */
+const FORM_TYPES=[["ANNUAL LEAVE","Annual leave"],["STUDY LEAVE","Study leave"],["FAMILY RESPONSIBILITY","Family responsibility"],["SICK","Sick"]];
+const FM={key:"",list:null,loading:false,type:"",open:false};
+const formsDoc=c=>"attMarks/forms_"+c.start;
+// Leave forms received for 14 Nov – 13 Dec 2026, from Muneer's leave forms list (23/11/2026). Types were not on the list: annual leave.
+const FORMS_SEED=[["Malgas, Ntsebenzo","C-MAL330","2026-10-28","2026-11-16",20],["Tlou, Mduduzi Thomas","C-TLO006","2026-11-11","2026-11-23",9],["Gwabeni, Zamxolo","C-GWA009","2026-11-11","2026-11-20",15],
+  ["Nyoni, Tshepang","C-NYO200","2026-11-25","2026-12-04",10],["Thomas, Retsedisitsoe","C-THO005","2026-11-02","2026-11-22",20],["Tshegelang, Ompolokile Rector","C-TSH128","2026-11-11","",20,"End date on the form: 2026/11/31"],
+  ["Tshabalala, Obuti David","C-TSH004","2026-11-13","2026-12-02",20],["Martin, Kudzai","C-MAR172","2026-11-13","2026-12-01",19],["Mbele, Kamohelo","C-MBE009","2026-12-14","2027-01-08",17],
+  ["Letoaba, Kenneth","C-LET004","2026-11-10","2026-11-17",6],["Morake, Kgopotso Puleng","C-MOR117","2026-11-21","2026-12-11",21],["Van Wyk, Lebogang","C-VAN060","2026-10-30","2026-11-18",20],
+  ["Ramadie, Modisaotsile","C-RAM081","2026-11-13","2026-11-25",13],["Senamolela, Simon","C-SEN037","2026-11-17","2026-11-26",10],["Engelbrecht, Adriaan","C-ENG008","2026-11-19","2026-11-20",2]];
+function loadForms(c){const key=c.start;if(FM.key===key&&(FM.list||FM.loading))return;FM.key=key;FM.loading=true;FM.list=null;
+  fdb.doc(formsDoc(c)).get().then(async d=>{let L=d.exists?(d.data().forms||[]):[];const seeded=d.exists&&d.data().seed1;
+    if(!seeded&&c.start==="2026-11-14"&&canWrite()){const byNo=new Map((S.emps||[]).map(e=>[String(e.number||"").toUpperCase(),e]));
+      for(const [nm,no,st,en,days,note] of FORMS_SEED){if(L.some(f=>f.number===no&&f.start===st))continue;const e=byNo.get(no);L.push({id:"f_"+Math.random().toString(36).slice(2,9),empId:e?e.id:"",name:e?e.name:nm,number:no,type:"ANNUAL LEAVE",start:st,end:en,days,note:note||"",by:"Leave forms list",at:Date.now()})}
+      await fdb.doc(formsDoc(c)).set({forms:L,seed1:true}).catch(e=>console.warn(e))}
+    FM.list=L;FM.loading=false;if(S.view==="forms")render()},e=>{FM.loading=false;FM.list=[];toast("Could not load the forms: "+(e.message||e))})}
+const formCovers=(f,e,code,a,b)=>(f.empId?f.empId===e.id:String(f.number||"").toUpperCase()===String(e.number||"").toUpperCase())&&f.type===code&&f.start<=b&&(f.end||f.start)>=a;
+function missingForms(c){const upto=c.dates.filter(d=>d<=iso(new Date())),out=[],codes=FORM_TYPES.map(t=>t[0]);
+  for(const e of activeEmps()){let run=null;const close=()=>{if(run){if(!(FM.list||[]).some(f=>formCovers(f,e,run.code,run.a,run.b)))out.push({e,code:run.code,a:run.a,b:run.b,n:run.n});run=null}};
+    for(const d of upto){const v=String(markOf(e,d)||"").toUpperCase();
+      if(codes.includes(v)){if(run&&run.code===v){run.b=d;run.n++}else{close();run={code:v,a:d,b:d,n:1}}}
+      else if(v==="OFF"&&run){/* an off day inside leave keeps the run going */}else close()}
+    close()}
+  return out.sort((x,y)=>x.e.name.localeCompare(y.e.name)||x.a.localeCompare(y.a))}
+const tName=k=>(FORM_TYPES.find(t=>t[0]===k)||[k,k])[1];
+const dRange=(a,b)=>a===b?short(a):short(a)+" – "+short(b);
+function formsSpec(c){const L=(FM.list||[]).slice().sort((x,y)=>x.type.localeCompare(y.type)||x.name.localeCompare(y.name)),M=missingForms(c);
+  return {title:"LEAVE AND SICK FORMS",sub:"Cycle "+short(c.start)+" "+yr(c.start)+" to "+short(c.end)+" "+yr(c.end),file:"TKR Leave and sick forms "+c.start+" to "+c.end,
+    tiles:[["Forms received",String(L.length)],...FORM_TYPES.map(([k,l])=>[l,String(L.filter(f=>f.type===k).length)]),["Forms missing",String(M.length)]],
+    sections:[...FORM_TYPES.map(([k,l])=>{const R=L.filter(f=>f.type===k);return {title:l+" forms received ("+R.length+")",head:["Employee","Employee no.","From","To","Days","Notes"],rows:R.length?R.map(f=>[f.name,f.number||"",f.start?short(f.start)+" "+yr(f.start):"",f.end?short(f.end)+" "+yr(f.end):"",String(f.days||""),f.note||""]):[["None received","","","","",""]]}}),
+      {title:"Forms missing ("+M.length+")",head:["Employee","Employee no.","Sheet","Type","Days in the register","Dates"],rows:M.length?M.map(x=>[x.e.name,x.e.number||"",x.e.sheet,tName(x.code),String(x.n),dRange(x.a,x.b)]):[["No forms missing","","","","",""]]}]}}
+function viewForms(){const c=cycleOf(S.date);loadForms(c);
+  if(FM.list===null){main.innerHTML='<div class="empty"><b>Loading the forms</b></div>';return}
+  const L=FM.list,M=missingForms(c),T=FM.type,show=k=>!T||T===k;
+  let h='<div class="bar" style="margin-bottom:10px"><button class="chip" data-fmt="" aria-pressed="'+(!T)+'">All</button>'+FORM_TYPES.map(([k,l])=>'<button class="chip" data-fmt="'+k+'" aria-pressed="'+(T===k)+'">'+l+'</button>').join("")+'</div>';
+  h+='<div class="tiles">'+[["Forms received",L.filter(f=>show(f.type)).length],["Forms missing",M.filter(x=>show(x.code)).length]].map(([k,v])=>'<div class="tile"><span>'+k+'</span><b>'+v+'</b></div>').join("")+'</div>';
+  h+='<div class="bar"><button class="btn gold" id="fmPdf">Download PDF</button><button class="btn gold" id="fmXls">Download Excel</button>'+(canWrite()?'<button class="btn" id="fmAdd">'+(FM.open?"Close":"Add a received form")+'</button>':"")+'</div>';
+  if(FM.open&&canWrite())h+='<form id="formForm" class="list" autocomplete="off"><h3>Add a received form</h3><div class="grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px">'
+    +'<label>Employee<input name="emp" list="fmEmps" required placeholder="Type a name or number"></label><datalist id="fmEmps">'+activeEmps().map(e=>'<option value="'+esc(e.name)+' · '+esc(e.number||"")+'">').join("")+'</datalist>'
+    +'<label>Type<select name="type">'+FORM_TYPES.map(([k,l])=>'<option value="'+k+'">'+l+'</option>').join("")+'</select></label><label>From<input type="date" name="start" required></label><label>To<input type="date" name="end" required></label><label>Days<input name="days" inputmode="numeric"></label><label>Notes<input name="note"></label></div>'
+    +'<div class="bar"><button class="btn gold">Save form</button></div></form>';
+  h+='<div class="lists">';
+  for(const [k,l] of FORM_TYPES){if(!show(k))continue;const R=L.filter(f=>f.type===k).sort((x,y)=>x.name.localeCompare(y.name));
+    h+='<div class="list"><h3>'+l+' forms received ('+R.length+')</h3>'+(R.length?'<table class="tbl"><thead><tr><th>Employee</th><th>From</th><th>To</th><th>Days</th>'+(canWrite()?'<th></th>':'')+'</tr></thead><tbody>'+R.map(f=>'<tr><td><b>'+esc(f.name)+'</b><br><span class="note">'+esc(f.number||"")+(f.note?' · '+esc(f.note):'')+'</span></td><td>'+(f.start?short(f.start):"")+'</td><td>'+(f.end?short(f.end):"")+'</td><td>'+esc(String(f.days||""))+'</td>'+(canWrite()?'<td><button class="chip" data-fmdel="'+f.id+'">Remove</button></td>':'')+'</tr>').join("")+'</tbody></table>':'<p class="none">None received.</p>')+'</div>'}
+  const MM=M.filter(x=>show(x.code));
+  h+='<div class="list"><h3>Forms missing ('+MM.length+')</h3><p class="note" style="margin-top:0">Leave and sick days marked in the register this cycle with no received form covering them.</p>'+(MM.length?'<table class="tbl"><thead><tr><th>Employee</th><th>Type</th><th>Dates</th><th>Days</th></tr></thead><tbody>'+MM.map(x=>'<tr><td><b>'+esc(x.e.name)+'</b><br><span class="note">'+esc(x.e.number||"")+' · '+esc(x.e.sheet)+'</span></td><td>'+tName(x.code)+'</td><td>'+dRange(x.a,x.b)+'</td><td>'+x.n+'</td></tr>').join("")+'</tbody></table>':'<p class="none">No forms missing.</p>')+'</div></div>';
+  main.innerHTML=h}
+async function saveForms(c){await fdb.doc(formsDoc(c)).set({forms:FM.list,seed1:true})}
+main.addEventListener("click",async ev=>{const t=ev.target.closest("button");if(!t||S.view!=="forms")return;const c=cycleOf(S.date);
+  if(t.dataset.fmt!==undefined){FM.type=t.dataset.fmt;render();return}
+  if(t.id==="fmAdd"){FM.open=!FM.open;render();return}
+  if(t.id==="fmPdf"){pdfSpec(formsSpec(c),t,"Download PDF");return}
+  if(t.id==="fmXls"){try{await loadJs("../lib/xlsx.full.min.js")}catch{}const sp=formsSpec(c),wb=XLSX.utils.book_new();for(const sec of sp.sections){const ws=XLSX.utils.aoa_to_sheet([[sec.title],[],sec.head,...sec.rows]);ws["!cols"]=sec.head.map((_,i)=>({wch:i?16:30}));XLSX.utils.book_append_sheet(wb,ws,sec.title.replace(/[\[\]\*\/\\\?:]/g,"").replace(/\s*\(.*\)$/,"").slice(0,31))}XLSX.writeFile(wb,sp.file+".xlsx");return}
+  if(t.dataset.fmdel){if(!canWrite())return;if(!confirm("Remove this form from the list?"))return;FM.list=FM.list.filter(f=>f.id!==t.dataset.fmdel);try{await saveForms(c);toast("Removed")}catch(e){toast("Not saved: "+(e.message||e))}render();return}});
+main.addEventListener("submit",async ev=>{if(ev.target.id!=="formForm")return;ev.preventDefault();const f=ev.target,c=cycleOf(S.date),q=f.emp.value.trim().toLowerCase();
+  const e=activeEmps().find(x=>(x.name+" · "+(x.number||"")).toLowerCase()===q)||activeEmps().find(x=>x.name.toLowerCase()===q||String(x.number||"").toLowerCase()===q);
+  if(!e){toast("Pick the employee from the list.");return}if(f.end.value<f.start.value){toast("The To date must be after the From date.");return}
+  FM.list.push({id:"f_"+Math.random().toString(36).slice(2,9),empId:e.id,name:e.name,number:e.number||"",type:f.type.value,start:f.start.value,end:f.end.value,days:f.days.value.trim(),note:f.note.value.trim(),by:email,at:Date.now()});
+  try{await saveForms(c);toast("Form saved");FM.open=false}catch(e2){FM.list.pop();toast("Not saved: "+(e2.message||e2))}render()});
 function viewPeople(){const list=filtered().sort((a,b)=>SHEETS.indexOf(a.sheet)-SHEETS.indexOf(b.sheet)||a.order-b.order);const e=editing||{};
   const groups=allGroups().map(g=>({group:g.id,sheet:g.sheet,section:g.section,shift:g.shift}));
   let h='<form class="form" id="empForm"><label>Sheet<select id="f-sheet" required>'+SHEETS.map(s=>'<option'+(e.sheet===s?" selected":"")+'>'+esc(s)+'</option>').join("")+'</select></label>'+
