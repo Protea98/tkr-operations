@@ -1352,7 +1352,7 @@ async function submitH(ev) {
       if (Object.keys(prop).some(k => (old[k] || "") !== (prop[k] || "") && lockedV(old, k))) { const why = f.elements.why?.value.trim();
         if (!why) { toast("Say why it must change, for the admin."); f.elements.why?.focus(); return; }
         await addReq({ target: { type: "ev", id: old.id }, what: evTxt(old), fromTxt: evTxt(old), toTxt: evTxt(prop), to: prop, why }); return; } }
-    const rec = { ...(old || {}), grid: undefined, id: old?.id || "ev_" + uid(), kind: "ev", ym: s.slice(0, 7), machine: v("machine"), group: groupOf(v("machine")), type: f.querySelector("input[name=type]:checked").value, start: s, end: e, reason: v("reason").trim(), action: (f.elements.action?.value || "").trim(), owner: (f.elements.owner?.value || "").trim(), eta: f.elements.eta?.value || "", endBy: e && !old?.end ? me.name : old?.endBy || "" };
+    const rec = { ...(old || {}), grid: 0, id: old?.id || "ev_" + uid(), kind: "ev", ym: s.slice(0, 7), machine: v("machine"), group: groupOf(v("machine")), type: f.querySelector("input[name=type]:checked").value, start: s, end: e, reason: v("reason").trim(), action: (f.elements.action?.value || "").trim(), owner: (f.elements.owner?.value || "").trim(), eta: f.elements.eta?.value || "", endBy: e && !old?.end ? me.name : old?.endBy || "" };
     await put(rec, `${old ? "Changed" : "Logged"} ${rec.machine}: ${TYPES[rec.type]} ${hhmm(s)}${e ? "–" + hhmm(e) : " (still going)"}${rec.reason ? " · " + rec.reason : ""}${rec.action ? " · action: " + rec.action : ""}${rec.owner ? " · " + rec.owner : ""}${rec.eta ? " · ETA " + fmt(rec.eta) : ""}`);
     const hc = f.elements.hourcell?.value; if (hc) { const [hd, hm2, hh] = hc.split("|"); await clearRest(hd, hm2, +hh); }   // the whole-hour entry in that hour is replaced by the typed times
     closeEv(); render(); toast(`Saved: ${rec.machine} ${TYPES[rec.type].toLowerCase()} from ${hhmm(s)}${e ? " to " + hhmm(e) : ""}.`);
@@ -1401,15 +1401,18 @@ async function syncNow(manual) {
     for (const r of recs.filter(r => r.kind === "doc" && !r.up && !r.deleted)) { let ok = true;
       for (let i = 0; i < (r.parts || 1); i++) { const data = await fileGet(`${r.fid}_${i}`); if (!data) { ok = false; break; } await setDoc(doc(db, "ctrl", `file_${r.fid}_${i}`), { kind: "file", ym: "files", data, v: 206 }); }
       if (ok) { r.up = 1; r.editedAt = Date.now(); r.synced = 0; await tx("readwrite", t => t.objectStore("rec").put(r)); } }
-    for (const r of recs.filter(r => !r.synced || r.synced < r.editedAt)) { const { synced, pin, ...out } = r;
+    const clean = o => JSON.parse(JSON.stringify(o));   // Firestore refuses empty (undefined) values: one such record used to stop all sending
+    let bad = 0;
+    for (const r of recs.filter(r => !r.synced || r.synced < r.editedAt)) { try { const { synced, pin, ...out } = r;
       let mergedHr = null;
       try { const cur = await fb.getDoc(doc(db, "ctrl", r.id)); if (cur.exists()) { const sv = cur.data();
         if (r.kind === "hr" && !r.deleted && !sv.deleted) { const cells = {}, ct = {}, A = r.cells || {}, B = sv.cells || {}, ta = r.ct || {}, tb = sv.ct || {};   // box by box: the newest change wins, an emptied box stays empty
           for (const k of new Set([...Object.keys(A), ...Object.keys(B), ...Object.keys(ta), ...Object.keys(tb)])) { const useA = (ta[k] || 0) >= (tb[k] || 0); const v = useA ? A[k] : B[k]; if (v) cells[k] = v; ct[k] = Math.max(ta[k] || 0, tb[k] || 0); }
           mergedHr = { ...sv, ...r, cells, ct, meter: { ...(sv.meter || {}), ...(r.meter || {}) }, notes: { ...(sv.notes || {}), ...(r.notes || {}) }, editedAt: Math.max(r.editedAt || 0, sv.editedAt || 0) }; }
         else if ((sv.editedAt || 0) > (r.editedAt || 0)) continue; } } catch {}   // a newer copy is already in the TKR app: don't write an older one over it
-      if (mergedHr) { const { synced: _s, pin: _p, ...mo } = mergedHr; await setDoc(doc(db, "ctrl", r.id), { ...mo, v: 206 }); Object.assign(r, mergedHr); r.synced = r.editedAt; await tx("readwrite", t => t.objectStore("rec").put(r)); continue; }
-      await setDoc(doc(db, "ctrl", r.id), { ...(r.kind === "user" ? { ...out, pin } : out), v: 206 }); r.synced = r.editedAt; await tx("readwrite", t => t.objectStore("rec").put(r)); }
+      if (mergedHr) { const { synced: _s, pin: _p, ...mo } = mergedHr; await setDoc(doc(db, "ctrl", r.id), clean({ ...mo, v: 206 })); Object.assign(r, mergedHr); r.synced = r.editedAt; await tx("readwrite", t => t.objectStore("rec").put(r)); continue; }
+      await setDoc(doc(db, "ctrl", r.id), clean({ ...(r.kind === "user" ? { ...out, pin } : out), v: 206 })); r.synced = r.editedAt; await tx("readwrite", t => t.objectStore("rec").put(r)); }
+      catch (e) { bad++; console.warn("not sent", r.id, e); if (e?.code === "unavailable") throw e; } }   // one record that can't be sent no longer holds back the rest
     const yms = ["setup", shiftMonth(today().slice(0, 7), -1), today().slice(0, 7)]; if (!yms.includes(month)) yms.push(month);
     const snap = await getDocs(query(collection(db, "ctrl"), where("ym", "in", yms)));
     let n = 0; for (const d of snap.docs) { const r = d.data(), have = recs.find(x => x.id === r.id);
