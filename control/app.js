@@ -183,7 +183,7 @@ async function pinHash(name, pin) {
 }
 const adminRec = () => R("admin").sort((a, b) => b.editedAt - a.editedAt)[0];
 const ADMINS = [{ id: "adm_muneer", name: "Muneer" }, { id: "adm_amogelang", name: "Amogelang" }];   // general admins: name and PIN, no password (23/11/2026)
-const admPin = id => byId(id + "_pin")?.pin || "";
+const admPin = id => byId(id + "_pin")?.pin || "", admSetup = id => byId(id + "_pin")?.setup || "";
 let adminStep = "";
 const okUser = u => !u.status || u.status === "approved";   // controllers added before 20/11/2026 stay approved
 const pendingUsers = () => R("user").filter(u => u.status === "pending");
@@ -198,8 +198,8 @@ function gateView() {
   if (adminStep === "pick") return pageHead("Control Room", "Admin", "", "", "Tap your name.")
     + `<div class="who-pick">${ADMINS.map(a => `<button data-adm="${a.id}"><b>${a.name}</b><small>${admPin(a.id) ? "admin" : "first time: choose your PIN"}</small></button>`).join("")}</div><div class="row" style="margin-top:14px"><button type="button" class="ghost" id="cancelAdm">Back</button></div>`;
   if (adminStep.startsWith("a:")) { const a = ADMINS.find(x => x.id === adminStep.slice(2)), set = !admPin(a.id);
-    return pageHead("Control Room", `${a.name} – admin`, "", "", set ? "Choose a 4-digit admin PIN and type it twice. Keep it to yourself." : "Type your admin PIN. Forgot it? The other admin can reset it under Requests.")
-      + `<form id="fAdm2" data-id="${a.id}" class="card" style="max-width:360px" autocomplete="off"><input name="pin" class="pin" inputmode="numeric" maxlength="4" type="text" autocomplete="one-time-code" style="-webkit-text-security:disc" required placeholder="${set ? "New PIN" : "PIN"}">
+    return pageHead("Control Room", `${a.name} – admin`, "", "", set ? "Type the setup code the other admin gave you, then choose a 4-digit admin PIN and type it twice." : "Type your admin PIN. Forgot it? The other admin can reset it under Requests.")
+      + `<form id="fAdm2" data-id="${a.id}" class="card" style="max-width:360px" autocomplete="off">${set && ADMINS.some(x => admPin(x.id)) ? `<input name="code" inputmode="numeric" maxlength="6" type="text" autocomplete="off" required placeholder="Setup code from the other admin" style="margin-bottom:10px">` : ""}<input name="pin" class="pin" inputmode="numeric" maxlength="4" type="text" autocomplete="one-time-code" style="-webkit-text-security:disc" required placeholder="${set ? "New PIN" : "PIN"}">
         ${set ? `<input name="pin2" class="pin" inputmode="numeric" maxlength="4" type="text" autocomplete="one-time-code" style="-webkit-text-security:disc;margin-top:10px" required placeholder="Again">` : ""}
         <div class="row" style="margin-top:14px"><button class="primary" style="flex:1">Open as admin</button><button type="button" class="ghost" id="cancelAdm">Back</button></div><p class="flag" id="pinErr"></p></form>`; }
   if (adminStep === "pin") { const a = adminRec();
@@ -963,7 +963,7 @@ async function decide(id, ok) {
 }
 function reqView() {
   const PU = pendingUsers(), puCard = !PU.length ? "" : `<section class="card" style="border:2px solid var(--gold)"><h2>New controllers waiting (${PU.length})</h2><div class="res">${PU.map(u => `<div class="ri"><div class="rt"><b>${esc(u.name)}</b><small>asked ${fmt(ymd(new Date(u.addedAt)))} ${tOf(u.addedAt)}</small></div>${me.admin ? `<div class="row" style="gap:6px"><button class="sm primary" data-uok="${u.id}">Approve</button><button class="sm danger" data-uno="${u.id}">Decline</button></div>` : '<span class="muted">waiting for the admin</span>'}</div>`).join("")}</div></section>`;
-  const admCard = !me.admin ? "" : `<section class="card"><h2>Admin PINs</h2><div class="res">${ADMINS.filter(a => a.id !== me.id).map(a => `<div class="ri"><div class="rt"><b>${a.name}</b><small>${admPin(a.id) ? "PIN set" : "no PIN yet – chooses one at first sign-in"}</small></div>${admPin(a.id) ? `<button class="sm ghost" data-admreset="${a.id}">Reset PIN</button>` : ""}</div>`).join("")}</div></section>`;
+  const admCard = !me.admin ? "" : `<section class="card"><h2>Admin PINs</h2><div class="res">${ADMINS.filter(a => a.id !== me.id).map(a => `<div class="ri"><div class="rt"><b>${a.name}</b><small>${admPin(a.id) ? "PIN set" : "no PIN yet – chooses one at first sign-in"}</small></div><button class="sm ghost" data-admreset="${a.id}">${admPin(a.id) ? "Reset PIN" : "Give a setup code"}</button></div>`).join("")}</div><p class="muted" style="margin:8px 0 0">Only Muneer and Amogelang can be admins. A new or forgotten admin PIN needs a one-time setup code from the other admin.</p></section>`;
   const Q = R("req").sort((a, b) => (a.status === "pending" ? 0 : 1) - (b.status === "pending" ? 0 : 1) || b.askedAt - a.askedAt), P = Q.filter(q => q.status === "pending");
   const when = t => `${fmt(ymd(new Date(t))).slice(0, 5)} ${new Date(t).toTimeString().slice(0, 5)}`;
   return pageHead("Control room", "Change requests", `${P.length} waiting`, "", me.admin ? "Changes asked for entries from an earlier shift. Approve makes the change; decline leaves it as it is." : "Grey boxes were filled in on an earlier shift and are locked. Tap a grey box to ask the admin to change it.")
@@ -1236,7 +1236,9 @@ async function clickH(ev) {
   if (b.hasAttribute("data-logout")) { logout(b.dataset.logout === "swap"); return; }
   if (b.id === "adminIn") { adminStep = "pick"; render(); return; }
   if (b.dataset.adm) { adminStep = "a:" + b.dataset.adm; render(); return; }
-  if (b.dataset.admreset) { if (!me?.admin) return; const id = b.dataset.admreset, r = byId(id + "_pin"); if (r) await put({ ...r, pin: "" }, `Admin PIN reset for ${ADMINS.find(a => a.id === id)?.name}`); render(); toast("Done. They choose a new PIN the next time they sign in."); return; }
+  if (b.dataset.admreset) { if (!me?.admin) return; const id = b.dataset.admreset, nm = ADMINS.find(a => a.id === id)?.name, code = String(100000 + (crypto.getRandomValues(new Uint32Array(1))[0] % 900000)), r = byId(id + "_pin");
+    await put({ ...(r || {}), id: id + "_pin", kind: "admin2", ym: "setup", name: nm, pin: "", setup: await pinHash("setup|" + id, code) }, `Admin setup code given for ${nm}`); render();
+    popupMsg("Setup code for " + nm + ": " + code, `Give ${nm} this code: ${code}. ${nm} taps Admin, then ${nm}, types the code and chooses a PIN. The code works once.`); return; }
   if (b.id === "cancelAdm") { adminStep = ""; render(); return; }
   if (b.id === "admReset") { adminStep = "email"; render(); return; }
   if (b.dataset.appr || b.dataset.decl) { b.disabled = true; await decide(b.dataset.appr || b.dataset.decl, !!b.dataset.appr); return; }
@@ -1321,7 +1323,8 @@ async function submitH(ev) {
       if ($("admErr")) $("admErr").textContent = msg; toast(msg); } return; }
   if (f.id === "fAdm2") { const id = f.dataset.id, a = ADMINS.find(x => x.id === id), p = f.elements.pin.value; if (!/^\d{4}$/.test(p)) { $("pinErr").textContent = "The PIN must be 4 numbers."; return; }
     const h = await pinHash("admin2|" + id, p), cur = admPin(id);
-    if (!cur) { if (p !== f.elements.pin2.value) { $("pinErr").textContent = "The two PINs are not the same."; return; } await put({ id: id + "_pin", kind: "admin2", ym: "setup", name: a.name, pin: h }, `${a.name} set an admin PIN`); }
+    if (!cur) { const sc = admSetup(id), first = !ADMINS.some(x => admPin(x.id)); if (!first && (!sc || sc !== await pinHash("setup|" + id, f.elements.code.value.trim()))) { $("pinErr").textContent = sc ? "That setup code is wrong." : "Ask the other admin for a setup code first (Requests → Admin PINs)."; return; }
+      if (p !== f.elements.pin2.value) { $("pinErr").textContent = "The two PINs are not the same."; return; } await put({ id: id + "_pin", kind: "admin2", ym: "setup", name: a.name, pin: h, setup: "" }, `${a.name} set an admin PIN`); }
     else if (cur !== h) { $("pinErr").textContent = "Wrong PIN. Try again."; f.elements.pin.value = ""; f.elements.pin.focus(); return; }
     await startSession({ id, name: a.name + " (admin)", admin: true }); adminStep = ""; tab = "req"; render(); return; }
   if (f.id === "fAdmPin") { const a = adminRec(); if (a && a.pin === await pinHash("admin|" + a.email, f.elements.pin.value)) { await startSession({ id: a.id, name: a.name, admin: true }); adminStep = ""; tab = "req"; render(); }
