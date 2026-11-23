@@ -549,7 +549,7 @@ async function keepDup(keepId,ids){if(!S.canWrite){toast("You can view this regi
   const list=L.filter(e=>!drop.some(d=>d.id===e.id)).map(e=>e.id===keep.id?Object.assign({},e,{aliases,altNumbers:nums,number:e.number||nums[0]||"",title:e.title||drop.map(d=>d.title).find(Boolean)||"",dept:e.dept||drop.map(d=>d.dept).find(Boolean)||""}):e);
   await saveEmps(list);toast(drop.length+" duplicate"+(drop.length>1?"s":"")+" taken off"+(moved?", "+moved+" marked days moved onto "+keep.name:"")+".")}
 /* ---------- leave and sick forms: received forms per cycle, and the leave / sick days in the register that have no form yet ---------- */
-const FORM_TYPES=[["ANNUAL LEAVE","Annual leave"],["STUDY LEAVE","Study leave"],["FAMILY RESPONSIBILITY","Family responsibility"],["SICK","Sick"]];
+const FORM_TYPES=[["ANNUAL LEAVE","Annual leave"],["STUDY LEAVE","Study leave"],["FAMILY RESPONSIBILITY","Family responsibility"],["SICK","Sick"],["OVERTIME","Overtime"]];
 const FM={key:"",list:null,loading:false,type:"",open:false};
 const formsDoc=c=>"attMarks/forms_"+c.start;
 // Leave forms received for 14 Nov – 13 Dec 2026, from Muneer's leave forms list (23/11/2026). Types were not on the list: annual leave.
@@ -569,20 +569,22 @@ function loadForms(c){const key=c.start;if(FM.key===key&&(FM.list||FM.loading))r
       await fdb.doc(formsDoc(c)).set({forms:L,seed1:true,seed2:true}).catch(e=>console.warn(e))}
     FM.list=L;FM.loading=false;if(S.view==="forms")render()},e=>{FM.loading=false;FM.list=[];toast("Could not load the forms: "+(e.message||e))})}
 const formCovers=(f,e,code,a,b)=>(f.empId?f.empId===e.id:String(f.number||"").toUpperCase()===String(e.number||"").toUpperCase())&&f.type===code&&f.start<=b&&(f.end||f.start)>=a;
-function missingForms(c){const upto=c.dates.filter(d=>d<=iso(new Date())),out=[],codes=FORM_TYPES.map(t=>t[0]);
+function missingForms(c){const upto=c.dates.filter(d=>d<=iso(new Date())),out=[],codes=FORM_TYPES.map(t=>t[0]).filter(k=>k!=="OVERTIME");
   for(const e of activeEmps()){let run=null;const close=()=>{if(run){if(!(FM.list||[]).some(f=>formCovers(f,e,run.code,run.a,run.b)))out.push({e,code:run.code,a:run.a,b:run.b,n:run.n});run=null}};
     for(const d of upto){const v=String(markOf(e,d)||"").toUpperCase();
       if(codes.includes(v)){if(run&&run.code===v){run.b=d;run.n++}else{close();run={code:v,a:d,b:d,n:1}}}
       else if(v==="OFF"&&run){/* an off day inside leave keeps the run going */}else close()}
-    close()}
+    close();
+    for(const d of upto){const h=otOf(e,d);if(h>0&&!(FM.list||[]).some(f=>formCovers(f,e,"OVERTIME",d,d)))out.push({e,code:"OVERTIME",a:d,b:d,n:h,ot:true,ott:cell(e,d,"ottype")||""})}}
   return out.sort((x,y)=>x.e.name.localeCompare(y.e.name)||x.a.localeCompare(y.a))}
 const tName=k=>(FORM_TYPES.find(t=>t[0]===k)||[k,k])[1];
+const hmOT=h=>{const m=Math.round(+h*60);return Math.floor(m/60)+":"+String(m%60).padStart(2,"0")};   // overtime hours as h:mm
 const dRange=(a,b)=>a===b?short(a):short(a)+" – "+short(b);
 function formsSpec(c){const L=(FM.list||[]).slice().sort((x,y)=>x.type.localeCompare(y.type)||x.name.localeCompare(y.name)),M=missingForms(c);
   return {title:"LEAVE AND SICK FORMS",sub:"Cycle "+short(c.start)+" "+yr(c.start)+" to "+short(c.end)+" "+yr(c.end),file:"TKR Leave and sick forms "+c.start+" to "+c.end,
     tiles:[["Forms received",String(L.length)],...FORM_TYPES.map(([k,l])=>[l,String(L.filter(f=>f.type===k).length)]),["Forms missing",String(M.length)]],
-    sections:[...FORM_TYPES.map(([k,l])=>{const R=L.filter(f=>f.type===k);return {title:l+" forms received ("+R.length+")",head:["Employee","Employee no.","From","To","Days","Notes"],rows:R.length?R.map(f=>[f.name,f.number||"",f.start?short(f.start)+" "+yr(f.start):"",f.end?short(f.end)+" "+yr(f.end):"",String(f.days||""),f.note||""]):[["None received","","","","",""]]}}),
-      {title:"Forms missing ("+M.length+")",head:["Employee","Employee no.","Sheet","Type","Days in the register","Dates"],rows:M.length?M.map(x=>[x.e.name,x.e.number||"",x.e.sheet,tName(x.code),String(x.n),dRange(x.a,x.b)]):[["No forms missing","","","","",""]]}]}}
+    sections:[...FORM_TYPES.map(([k,l])=>{const R=L.filter(f=>f.type===k);return {title:l+" forms received ("+R.length+")",head:["Employee","Employee no.",k==="OVERTIME"?"Date":"From",k==="OVERTIME"?"":"To",k==="OVERTIME"?"Hours":"Days","Notes"],rows:R.length?R.map(f=>[f.name,f.number||"",f.start?short(f.start)+" "+yr(f.start):"",f.end&&k!=="OVERTIME"?short(f.end)+" "+yr(f.end):"",String(f.days||""),f.note||""]):[["None received","","","","",""]]}}),
+      {title:"Forms missing ("+M.length+")",head:["Employee","Employee no.","Sheet","Type","Days / hours in the register","Dates"],rows:M.length?M.map(x=>[x.e.name,x.e.number||"",x.e.sheet,tName(x.code)+(x.ott?" ("+x.ott+")":""),x.ot?hmOT(x.n)+" h":String(x.n),dRange(x.a,x.b)]):[["No forms missing","","","","",""]]}]}}
 function viewForms(){const c=cycleOf(S.date);loadForms(c);
   if(FM.list===null){main.innerHTML='<div class="empty"><b>Loading the forms</b></div>';return}
   const L=FM.list,M=missingForms(c),T=FM.type,show=k=>!T||T===k;
@@ -592,13 +594,13 @@ function viewForms(){const c=cycleOf(S.date);loadForms(c);
   h+='<div class="bar"><button class="btn gold" id="fmPdf">Download PDF</button><button class="btn gold" id="fmXls">Download Excel</button>'+(canWrite()?'<button class="btn" id="fmAdd">'+(FM.open?"Close":"Add a received form")+'</button><button class="btn" id="fmImp">Update from the Sick, overtime and leave Excel</button><input type="file" id="fmFile" accept=".xlsx,.xls" hidden>':"")+'</div>';
   if(FM.open&&canWrite())h+='<form id="formForm" class="list" autocomplete="off"><h3>Add a received form</h3><div class="grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px">'
     +'<label>Employee<input name="emp" list="fmEmps" required placeholder="Type a name or number"></label><datalist id="fmEmps">'+activeEmps().map(e=>'<option value="'+esc(e.name)+' · '+esc(e.number||"")+'">').join("")+'</datalist>'
-    +'<label>Type<select name="type">'+FORM_TYPES.map(([k,l])=>'<option value="'+k+'">'+l+'</option>').join("")+'</select></label><label>From<input type="date" name="start" required></label><label>To<input type="date" name="end" required></label><label>Days<input name="days" inputmode="numeric"></label><label>Notes<input name="note"></label></div>'
+    +'<label>Type<select name="type">'+FORM_TYPES.map(([k,l])=>'<option value="'+k+'">'+l+'</option>').join("")+'</select></label><label>From<input type="date" name="start" required></label><label>To<input type="date" name="end" required></label><label>Days (hours for overtime)<input name="days" inputmode="decimal"></label><label>Notes<input name="note"></label></div>'
     +'<div class="bar"><button class="btn gold">Save form</button></div></form>';
   h+='<div class="lists">';
   for(const [k,l] of FORM_TYPES){if(!show(k))continue;const R=L.filter(f=>f.type===k).sort((x,y)=>x.name.localeCompare(y.name));
-    h+='<div class="list"><h3>'+l+' forms received ('+R.length+')</h3>'+(R.length?'<table class="tbl"><thead><tr><th>Employee</th><th>From</th><th>To</th><th>Days</th>'+(canWrite()?'<th></th>':'')+'</tr></thead><tbody>'+R.map(f=>'<tr><td><b>'+esc(f.name)+'</b><br><span class="note">'+esc(f.number||"")+(f.note?' · '+esc(f.note):'')+'</span></td><td>'+(f.start?short(f.start):"")+'</td><td>'+(f.end?short(f.end):"")+'</td><td>'+esc(String(f.days||""))+'</td>'+(canWrite()?'<td><button class="chip" data-fmdel="'+f.id+'">Remove</button></td>':'')+'</tr>').join("")+'</tbody></table>':'<p class="none">None received.</p>')+'</div>'}
+    h+='<div class="list"><h3>'+l+' forms received ('+R.length+')</h3>'+(R.length?'<table class="tbl"><thead><tr><th>Employee</th><th>'+(k==="OVERTIME"?"Date":"From")+'</th><th>'+(k==="OVERTIME"?"":"To")+'</th><th>'+(k==="OVERTIME"?"Hours":"Days")+'</th>'+(canWrite()?'<th></th>':'')+'</tr></thead><tbody>'+R.map(f=>'<tr><td><b>'+esc(f.name)+'</b><br><span class="note">'+esc(f.number||"")+(f.note?' · '+esc(f.note):'')+'</span></td><td>'+(f.start?short(f.start):"")+'</td><td>'+(f.end&&k!=="OVERTIME"?short(f.end):"")+'</td><td>'+esc(String(f.days||""))+'</td>'+(canWrite()?'<td><button class="chip" data-fmdel="'+f.id+'">Remove</button></td>':'')+'</tr>').join("")+'</tbody></table>':'<p class="none">None received.</p>')+'</div>'}
   const MM=M.filter(x=>show(x.code));
-  h+='<div class="list"><h3>Forms missing ('+MM.length+')</h3><p class="note" style="margin-top:0">Leave and sick days marked in the register this cycle with no received form covering them.</p>'+(MM.length?'<table class="tbl"><thead><tr><th>Employee</th><th>Type</th><th>Dates</th><th>Days</th></tr></thead><tbody>'+MM.map(x=>'<tr><td><b>'+esc(x.e.name)+'</b><br><span class="note">'+esc(x.e.number||"")+' · '+esc(x.e.sheet)+'</span></td><td>'+tName(x.code)+'</td><td>'+dRange(x.a,x.b)+'</td><td>'+x.n+'</td></tr>').join("")+'</tbody></table>':'<p class="none">No forms missing.</p>')+'</div></div>';
+  h+='<div class="list"><h3>Forms missing ('+MM.length+')</h3><p class="note" style="margin-top:0">Leave, sick and overtime in the register this cycle with no received form covering it.</p>'+(MM.length?'<table class="tbl"><thead><tr><th>Employee</th><th>Type</th><th>Dates</th><th>Days / hours</th></tr></thead><tbody>'+MM.map(x=>'<tr><td><b>'+esc(x.e.name)+'</b><br><span class="note">'+esc(x.e.number||"")+' · '+esc(x.e.sheet)+'</span></td><td>'+tName(x.code)+(x.ott?' <span class="note">('+esc(x.ott)+')</span>':'')+'</td><td>'+dRange(x.a,x.b)+'</td><td>'+(x.ot?hmOT(x.n)+' h':x.n)+'</td></tr>').join("")+'</tbody></table>':'<p class="none">No forms missing.</p>')+'</div></div>';
   main.innerHTML=h}
 /* reads the Sick, Overtime and Leave workbook: the received tables (sick notes received, leave forms received, family responsibility leave with proof received); the "on the timesheet" tables are left out */
 async function importFormsXlsx(file){const c=cycleOf(S.date);await loadJs("../lib/xlsx.full.min.js");
@@ -608,13 +610,14 @@ async function importFormsXlsx(file){const c=cycleOf(S.date);await loadJs("../li
     for(const r of rows){const cells=r.map(v=>v==null?"":String(v).trim().toUpperCase()),filled=cells.filter(Boolean);
       if(filled.length===1&&!H){sec=filled[0];continue}
       if(filled.length===1&&H){sec=filled[0];H=null;continue}
+      if(cells.includes("NAME AND SURNAME")&&/OVERTIME/.test(sec+" "+name.toUpperCase())){const ix=f=>cells.findIndex(f);H={type:"OVERTIME",emp:cells.indexOf("NAME AND SURNAME"),no:-1,from:ix(x=>x==="DATE"),to:-1,days:ix(x=>x.includes("HRS ON THE SHEET")),ok:-1,why:ix(x=>x==="REASON"),kind:ix(x=>x.includes("STANDBY"))};continue}
       if(cells.includes("EMPLOYEE NO.")){const want=!/TIMESHEET/.test(sec)&&/RECEIVED|FAMILY RESPONSIBILITY LEAVE|STUDY/.test(sec);
         const type=/SICK/.test(sec)?"SICK":/FAMILY/.test(sec)?"FAMILY RESPONSIBILITY":/STUDY/.test(sec)?"STUDY LEAVE":"ANNUAL LEAVE";
         const ix=f=>cells.findIndex(f);H=want?{type,emp:cells.indexOf("EMPLOYEE"),no:cells.indexOf("EMPLOYEE NO."),from:ix(x=>x.includes("FROM")||x.includes("START")),to:ix(x=>x==="TO"||x.includes("TILL")||x.includes("END")),days:ix(x=>x.includes("DAYS")),ok:ix(x=>x.includes("RECEIVED")||x.includes("SUBMIT")),why:ix(x=>x.includes("NATURE"))}:null;continue}
-      if(!H||!filled.length)continue;const no=String(r[H.no]||"").trim().toUpperCase(),nm=String(r[H.emp]||"").trim();if(!no&&!nm)continue;
+      if(!H||!filled.length)continue;const nm=String(r[H.emp]||"").trim(),key=x=>x.toLowerCase().replace(/,/g,"").split(/\s+/).filter(Boolean).sort().join(" "),byName=nm?activeEmps().find(x=>key(x.name)===key(nm)):null,no=H.no>=0?String(r[H.no]||"").trim().toUpperCase():String(byName?.number||"").toUpperCase();if(!no&&!nm)continue;
       if(H.ok>=0&&!/^Y/i.test(String(r[H.ok]||"")))continue;
-      const st=dt(r[H.from]),en=H.to>=0?dt(r[H.to]):"",e=byNo.get(no);
-      const note=(H.why>=0&&r[H.why]?String(r[H.why]).trim():"")+(H.to>=0&&r[H.to]&&!en?(H.why>=0&&r[H.why]?" · ":"")+"End date on the form: "+String(r[H.to]).trim():"");
+      const st=dt(r[H.from]),en=H.to>=0?dt(r[H.to]):(H.type==="OVERTIME"?dt(r[H.from]):""),e=byNo.get(no)||(H.no<0?byName:null);
+      const note=(H.kind>=0&&r[H.kind]?String(r[H.kind]).trim()+(H.why>=0&&r[H.why]?" · ":""):"")+(H.why>=0&&r[H.why]?String(r[H.why]).trim():"")+(H.to>=0&&r[H.to]&&!en&&H.type!=="OVERTIME"?(H.why>=0&&r[H.why]?" · ":"")+"End date on the form: "+String(r[H.to]).trim():"");
       if(!st){bad.push(nm||no);continue}
       add.push({id:"f_"+Math.random().toString(36).slice(2,9),empId:e?e.id:"",name:e?e.name:nm,number:no,type:H.type,start:st,end:en,days:H.days>=0&&r[H.days]!=null?String(r[H.days]):"",note,by:"Excel: "+file.name,at:Date.now()})}}
   const L=FM.list||[];let n=0;for(const f of add){if(L.some(x=>x.number===f.number&&x.type===f.type&&x.start===f.start))continue;L.push(f);n++}
