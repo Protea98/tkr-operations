@@ -563,6 +563,10 @@ function loadForms(c){const key=c.start;if(FM.key===key&&(FM.list||FM.loading))r
     if(!seeded&&c.start==="2026-11-14"&&canWrite()){const byNo=new Map((S.emps||[]).map(e=>[String(e.number||"").toUpperCase(),e]));
       for(const [nm,no,st,en,days,note] of FORMS_SEED){if(L.some(f=>f.number===no&&f.start===st))continue;const e=byNo.get(no);L.push({id:"f_"+Math.random().toString(36).slice(2,9),empId:e?e.id:"",name:e?e.name:nm,number:no,type:"ANNUAL LEAVE",start:st,end:en,days,note:note||"",by:"Leave forms list",at:Date.now()})}
       await fdb.doc(formsDoc(c)).set({forms:L,seed1:true}).catch(e=>console.warn(e))}
+    if(!(d.exists&&d.data().seed2)&&c.start==="2026-11-14"&&canWrite()){const byNo=new Map((S.emps||[]).map(e=>[String(e.number||"").toUpperCase(),e]));   // Sick, Overtime and Leave workbook (23/11/2026): sick note and family responsibility proof received
+      for(const [nm,no,ty,st,en,days,note] of [["Magaya, Kudzaishe","C-MAG032","SICK","2026-11-19","2026-11-20","","Medical condition"],["Mnisi, Kenneth","C-MNI002","FAMILY RESPONSIBILITY","2026-11-19","2026-11-19",1,""]]){if(L.some(f=>f.number===no&&f.type===ty&&f.start===st))continue;const e=byNo.get(no);
+        L.push({id:"f_"+Math.random().toString(36).slice(2,9),empId:e?e.id:"",name:e?e.name:nm,number:no,type:ty,start:st,end:en,days,note,by:"Sick, Overtime and Leave Excel",at:Date.now()})}
+      await fdb.doc(formsDoc(c)).set({forms:L,seed1:true,seed2:true}).catch(e=>console.warn(e))}
     FM.list=L;FM.loading=false;if(S.view==="forms")render()},e=>{FM.loading=false;FM.list=[];toast("Could not load the forms: "+(e.message||e))})}
 const formCovers=(f,e,code,a,b)=>(f.empId?f.empId===e.id:String(f.number||"").toUpperCase()===String(e.number||"").toUpperCase())&&f.type===code&&f.start<=b&&(f.end||f.start)>=a;
 function missingForms(c){const upto=c.dates.filter(d=>d<=iso(new Date())),out=[],codes=FORM_TYPES.map(t=>t[0]);
@@ -582,7 +586,8 @@ function formsSpec(c){const L=(FM.list||[]).slice().sort((x,y)=>x.type.localeCom
 function viewForms(){const c=cycleOf(S.date);loadForms(c);
   if(FM.list===null){main.innerHTML='<div class="empty"><b>Loading the forms</b></div>';return}
   const L=FM.list,M=missingForms(c),T=FM.type,show=k=>!T||T===k;
-  let h='<div class="bar" style="margin-bottom:10px"><button class="chip" data-fmt="" aria-pressed="'+(!T)+'">All</button>'+FORM_TYPES.map(([k,l])=>'<button class="chip" data-fmt="'+k+'" aria-pressed="'+(T===k)+'">'+l+'</button>').join("")+'</div>';
+  let h='<div class="bar" style="margin-bottom:6px;align-items:center"><button class="chip" data-fmcyc="-1">‹ Previous cycle</button><h3 style="margin:0 8px">Cycle '+short(c.start)+' '+yr(c.start)+' – '+short(c.end)+' '+yr(c.end)+'</h3><button class="chip" data-fmcyc="1">Next cycle ›</button></div>';
+  h+='<div class="bar" style="margin-bottom:10px"><button class="chip" data-fmt="" aria-pressed="'+(!T)+'">All</button>'+FORM_TYPES.map(([k,l])=>'<button class="chip" data-fmt="'+k+'" aria-pressed="'+(T===k)+'">'+l+'</button>').join("")+'</div>';
   h+='<div class="tiles">'+[["Forms received",L.filter(f=>show(f.type)).length],["Forms missing",M.filter(x=>show(x.code)).length]].map(([k,v])=>'<div class="tile"><span>'+k+'</span><b>'+v+'</b></div>').join("")+'</div>';
   h+='<div class="bar"><button class="btn gold" id="fmPdf">Download PDF</button><button class="btn gold" id="fmXls">Download Excel</button>'+(canWrite()?'<button class="btn" id="fmAdd">'+(FM.open?"Close":"Add a received form")+'</button><button class="btn" id="fmImp">Update from the Sick, overtime and leave Excel</button><input type="file" id="fmFile" accept=".xlsx,.xls" hidden>':"")+'</div>';
   if(FM.open&&canWrite())h+='<form id="formForm" class="list" autocomplete="off"><h3>Add a received form</h3><div class="grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px">'
@@ -614,9 +619,10 @@ async function importFormsXlsx(file){const c=cycleOf(S.date);await loadJs("../li
       add.push({id:"f_"+Math.random().toString(36).slice(2,9),empId:e?e.id:"",name:e?e.name:nm,number:no,type:H.type,start:st,end:en,days:H.days>=0&&r[H.days]!=null?String(r[H.days]):"",note,by:"Excel: "+file.name,at:Date.now()})}}
   const L=FM.list||[];let n=0;for(const f of add){if(L.some(x=>x.number===f.number&&x.type===f.type&&x.start===f.start))continue;L.push(f);n++}
   FM.list=L;await saveForms(c);render();toast(n+" new form"+(n===1?"":"s")+" added"+(add.length-n?", "+(add.length-n)+" already on the list":"")+(bad.length?". No start date for: "+bad.join(", "):""))}
-async function saveForms(c){await fdb.doc(formsDoc(c)).set({forms:FM.list,seed1:true})}
+async function saveForms(c){await fdb.doc(formsDoc(c)).set({forms:FM.list,seed1:true,seed2:true})}
 main.addEventListener("click",async ev=>{const t=ev.target.closest("button");if(!t||S.view!=="forms")return;const c=cycleOf(S.date);
   if(t.dataset.fmt!==undefined){FM.type=t.dataset.fmt;render();return}
+  if(t.dataset.fmcyc){const k=+t.dataset.fmcyc,d=parse(k<0?c.start:c.end);d.setDate(d.getDate()+k);S.date=iso(d);if(S.db)watchCycle();render();return}
   if(t.id==="fmAdd"){FM.open=!FM.open;render();return}
   if(t.id==="fmImp"){const inp=$("fmFile");inp.value="";inp.onchange=()=>{const f=inp.files[0];if(f)importFormsXlsx(f).catch(e=>toast("Couldn't read that file: "+(e.message||e)))};inp.click();return}
   if(t.id==="fmPdf"){pdfSpec(formsSpec(c),t,"Download PDF");return}
