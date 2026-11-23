@@ -565,7 +565,7 @@ function loadForms(c){const key=c.start;if(FM.key===key&&(FM.list||FM.loading))r
       await fdb.doc(formsDoc(c)).set({forms:L,seed1:true}).catch(e=>console.warn(e))}
     FM.list=L;FM.loading=false;if(S.view==="forms")render()},e=>{FM.loading=false;FM.list=[];toast("Could not load the forms: "+(e.message||e))})}
 const formCovers=(f,e,code,a,b)=>(f.empId?f.empId===e.id:String(f.number||"").toUpperCase()===String(e.number||"").toUpperCase())&&f.type===code&&f.start<=b&&(f.end||f.start)>=a;
-function missingForms(c){const upto=c.dates.filter(d=>d<=iso(new Date())),out=[],codes=FORM_TYPES.map(t=>t[0]);
+function missingForms(c){const upto=c.dates,out=[],codes=FORM_TYPES.map(t=>t[0]);
   for(const e of activeEmps()){let run=null;const close=()=>{if(run){if(!(FM.list||[]).some(f=>formCovers(f,e,run.code,run.a,run.b)))out.push({e,code:run.code,a:run.a,b:run.b,n:run.n});run=null}};
     for(const d of upto){const v=String(markOf(e,d)||"").toUpperCase();
       if(codes.includes(v)){if(run&&run.code===v){run.b=d;run.n++}else{close();run={code:v,a:d,b:d,n:1}}}
@@ -582,7 +582,7 @@ function formsSpec(c){const L=(FM.list||[]).slice().sort((x,y)=>x.type.localeCom
 function viewForms(){const c=cycleOf(S.date);loadForms(c);
   if(FM.list===null){main.innerHTML='<div class="empty"><b>Loading the forms</b></div>';return}
   const L=FM.list,M=missingForms(c),T=FM.type,show=k=>!T||T===k;
-  let h='<div class="bar" style="margin-bottom:10px"><button class="chip" data-fmt="" aria-pressed="'+(!T)+'">All</button>'+FORM_TYPES.map(([k,l])=>'<button class="chip" data-fmt="'+k+'" aria-pressed="'+(T===k)+'">'+l+'</button>').join("")+'</div>';
+  let h='<h3 style="margin:0 0 8px">Cycle '+short(c.start)+' '+yr(c.start)+' to '+short(c.end)+' '+yr(c.end)+'</h3><div class="bar" style="margin-bottom:10px"><button class="chip" data-fmt="" aria-pressed="'+(!T)+'">All</button>'+FORM_TYPES.map(([k,l])=>'<button class="chip" data-fmt="'+k+'" aria-pressed="'+(T===k)+'">'+l+'</button>').join("")+'</div>';
   h+='<div class="tiles">'+[["Forms received",L.filter(f=>show(f.type)).length],["Forms missing",M.filter(x=>show(x.code)).length]].map(([k,v])=>'<div class="tile"><span>'+k+'</span><b>'+v+'</b></div>').join("")+'</div>';
   h+='<div class="bar"><button class="btn gold" id="fmPdf">Download PDF</button><button class="btn gold" id="fmXls">Download Excel</button>'+(canWrite()?'<button class="btn" id="fmAdd">'+(FM.open?"Close":"Add a received form")+'</button><button class="btn" id="fmImp">Update from the Sick, overtime and leave Excel</button><input type="file" id="fmFile" accept=".xlsx,.xls" hidden>':"")+'</div>';
   if(FM.open&&canWrite())h+='<form id="formForm" class="list" autocomplete="off"><h3>Add a received form</h3><div class="grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px">'
@@ -593,7 +593,7 @@ function viewForms(){const c=cycleOf(S.date);loadForms(c);
   for(const [k,l] of FORM_TYPES){if(!show(k))continue;const R=L.filter(f=>f.type===k).sort((x,y)=>x.name.localeCompare(y.name));
     h+='<div class="list"><h3>'+l+' forms received ('+R.length+')</h3>'+(R.length?'<table class="tbl"><thead><tr><th>Employee</th><th>From</th><th>To</th><th>Days</th>'+(canWrite()?'<th></th>':'')+'</tr></thead><tbody>'+R.map(f=>'<tr><td><b>'+esc(f.name)+'</b><br><span class="note">'+esc(f.number||"")+(f.note?' · '+esc(f.note):'')+'</span></td><td>'+(f.start?short(f.start):"")+'</td><td>'+(f.end?short(f.end):"")+'</td><td>'+esc(String(f.days||""))+'</td>'+(canWrite()?'<td><button class="chip" data-fmdel="'+f.id+'">Remove</button></td>':'')+'</tr>').join("")+'</tbody></table>':'<p class="none">None received.</p>')+'</div>'}
   const MM=M.filter(x=>show(x.code));
-  h+='<div class="list"><h3>Forms missing ('+MM.length+')</h3><p class="note" style="margin-top:0">Leave and sick days marked in the register this cycle with no received form covering them.</p>'+(MM.length?'<table class="tbl"><thead><tr><th>Employee</th><th>Type</th><th>Dates</th><th>Days</th></tr></thead><tbody>'+MM.map(x=>'<tr><td><b>'+esc(x.e.name)+'</b><br><span class="note">'+esc(x.e.number||"")+' · '+esc(x.e.sheet)+'</span></td><td>'+tName(x.code)+'</td><td>'+dRange(x.a,x.b)+'</td><td>'+x.n+'</td></tr>').join("")+'</tbody></table>':'<p class="none">No forms missing.</p>')+'</div></div>';
+  h+='<div class="list"><h3>Forms missing ('+MM.length+')</h3><p class="note" style="margin-top:0">Leave and sick days marked in the register for the whole cycle ('+short(c.start)+' to '+short(c.end)+') with no received form covering them.</p>'+(MM.length?'<table class="tbl"><thead><tr><th>Employee</th><th>Type</th><th>Dates</th><th>Days</th></tr></thead><tbody>'+MM.map(x=>'<tr><td><b>'+esc(x.e.name)+'</b><br><span class="note">'+esc(x.e.number||"")+' · '+esc(x.e.sheet)+'</span></td><td>'+tName(x.code)+'</td><td>'+dRange(x.a,x.b)+'</td><td>'+x.n+'</td></tr>').join("")+'</tbody></table>':'<p class="none">No forms missing.</p>')+'</div></div>';
   main.innerHTML=h}
 /* reads the Sick, Overtime and Leave workbook: the received tables (sick notes received, leave forms received, family responsibility leave with proof received); the "on the timesheet" tables are left out */
 async function importFormsXlsx(file){const c=cycleOf(S.date);await loadJs("../lib/xlsx.full.min.js");
