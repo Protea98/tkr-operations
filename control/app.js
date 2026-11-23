@@ -101,7 +101,7 @@ async function discardChanges() {
   const n = undo.filter(u => recs.find(x => x.id === u.id)?.kind !== "log").length; await clearUndo(); syncSoon(); return n;
 }
 async function put(r, log) {
-  if (me && r.kind !== "duty" && r.kind !== "log") { const x = dutyLive(); if (x && x.sid !== me.sid) { dutyCheck(); throw new Error("not on duty"); } }   // only the person on duty can change anything
+  if (me && !me.admin && r.kind !== "duty" && r.kind !== "log") { const x = dutyLive(); if (x && x.sid !== me.sid) { dutyCheck(); throw new Error("not on duty"); } }   // only the person on duty can change anything
   const old = recs.find(x => x.id === r.id); journal(r.id, old);
   if (r.kind === "hr") { const a0 = old?.cells || {}, b0 = r.cells || {}, ct = { ...(old?.ct || {}), ...(r.ct || {}) }, t0 = Date.now();   // when each hour box last changed (also when it was emptied), so PCs merge box by box
     for (const k of new Set([...Object.keys(a0), ...Object.keys(b0)])) if ((a0[k] || "") !== (b0[k] || "")) ct[k] = t0; r = { ...r, ct }; }
@@ -910,11 +910,11 @@ let admApp = null;
    the admin can, and then everyone else is signed out. The PC on duty confirms it every 2 minutes; after 15 minutes without that, the duty is free. */
 let devId = ""; try { devId = localStorage.getItem("tkr-ctl-dev") || ""; if (!devId) { devId = "d_" + uid(); localStorage.setItem("tkr-ctl-dev", devId); } } catch { devId = "d_" + uid(); }
 const dutyRec = () => recs.find(r => r.id === "duty" && !r.deleted);
-const dutyLive = () => { const x = dutyRec(); return x && x.sid && Date.now() - (x.at || 0) < 15 * 6e4 ? x : null; };
-async function setDuty(on) { const old = dutyRec(); if (on) await put({ ...(old || {}), id: "duty", kind: "duty", ym: "setup", user: me.id, name: me.name, sid: me.sid, dev: devId, admin: !!me.admin, at: Date.now(), deleted: false });
+const dutyLive = () => { const x = dutyRec(); return x && x.sid && !x.admin && Date.now() - (x.at || 0) < 15 * 6e4 ? x : null; };   // an admin never holds the duty: controllers can always sign in
+async function setDuty(on) { if (me?.admin) return; const old = dutyRec(); if (on) await put({ ...(old || {}), id: "duty", kind: "duty", ym: "setup", user: me.id, name: me.name, sid: me.sid, dev: devId, admin: !!me.admin, at: Date.now(), deleted: false });
   else if (old && old.sid === me?.sid) await put({ ...old, sid: "", at: 0 }); syncSoon(); }
 function dutyCheck() { const x = dutyLive(); if (!me || !x || x.sid === me.sid) return;
-  if (me.admin) { if (!x.admin) setDuty(true); return; }   // the admin is never pushed out by a controller's PC: the admin takes the duty back
+  if (me.admin) return;   // admins sign in beside the controller on duty and are never signed out by them
   const who = x.name; me = null; metaSet("me", null).catch(() => {}); clearUndo().catch(() => {}); pinFor = null; tab = "now"; closeEv(); render();
   popupMsg("Signed out", `${esc(who)} is now on duty in the Control Room${x.admin ? " (admin)" : ""}. Only one person can be signed in at a time, so this PC was signed out.`); }
 setInterval(() => { if (me && dutyRec()?.sid === me.sid) setDuty(true); }, 2 * 6e4);
