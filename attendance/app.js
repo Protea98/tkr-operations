@@ -417,7 +417,7 @@ async function pdfSpec(sp,btn,label){btn.disabled=true;btn.textContent="Making t
     let y=60+(Math.ceil(sp.tiles.length/per)-1)*23;for(const sec of sp.sections){P.setTextColor(...BLACK);P.setFont("helvetica","bold");P.setFontSize(11.5);if(y>268){P.addPage();head();y=34}P.text(sec.title,12,y);
       P.autoTable({startY:y+2,head:[sec.head],body:sec.rows.map(r=>r.map(c=>typeof c==="object"?{content:c.content,styles:{fontStyle:"bold",fillColor:[255,242,204]}}:c)),margin:{left:12,right:12,top:30},theme:"grid",
         styles:{fontSize:8.8,cellPadding:1.6,textColor:BLACK,lineColor:[217,211,197]},headStyles:{fillColor:[38,38,38],textColor:255,fontStyle:"bold"},alternateRowStyles:{fillColor:[255,248,230]},didDrawPage:()=>head()});y=P.lastAutoTable.finalY+9}
-    const n=P.getNumberOfPages();for(let i=1;i<=n;i++){P.setPage(i);P.setFontSize(8);P.setTextColor(120);P.setFont("helvetica","normal");P.text("Attendance = present ÷ (present + exception days). Exceptions: AWOP, sick and maternity leave.   Printed "+nice(iso(new Date()))+" "+yr(iso(new Date()))+"   ·   page "+i+" of "+n,12,288,{maxWidth:W-24})}
+    const n=P.getNumberOfPages();for(let i=1;i<=n;i++){P.setPage(i);P.setFontSize(8);P.setTextColor(120);P.setFont("helvetica","normal");P.text((sp.foot||"Attendance = present ÷ (present + exception days). Exceptions: AWOP, sick and maternity leave.")+"   Printed "+nice(iso(new Date()))+" "+yr(iso(new Date()))+"   ·   page "+i+" of "+n,12,288,{maxWidth:W-24})}
     P.save(sp.file+".pdf");toast("PDF report downloaded")}
   catch(e){console.warn(e);toast("The PDF couldn't be made: "+(e.message||"try again"))}
   btn.disabled=false;btn.textContent=label}
@@ -581,7 +581,7 @@ const tName=k=>(FORM_TYPES.find(t=>t[0]===k)||[k,k])[1];
 const hmOT=h=>{const m=Math.round(+h*60);return Math.floor(m/60)+":"+String(m%60).padStart(2,"0")};   // overtime hours as h:mm
 const dRange=(a,b)=>a===b?short(a):short(a)+" – "+short(b);
 function formsSpec(c){const L=(FM.list||[]).slice().sort((x,y)=>x.type.localeCompare(y.type)||x.name.localeCompare(y.name)),M=missingForms(c);
-  return {title:"LEAVE AND SICK FORMS",sub:"Cycle "+short(c.start)+" "+yr(c.start)+" to "+short(c.end)+" "+yr(c.end),file:"TKR Leave and sick forms "+c.start+" to "+c.end,
+  return {foot:"Forms missing: leave, sick and overtime in the register with no received form covering it.",title:"LEAVE, SICK AND OVERTIME FORMS",sub:"Cycle "+short(c.start)+" "+yr(c.start)+" to "+short(c.end)+" "+yr(c.end),file:"TKR Leave, sick and overtime forms "+c.start+" to "+c.end,
     tiles:[["Forms received",String(L.length)],...FORM_TYPES.map(([k,l])=>[l,String(L.filter(f=>f.type===k).length)]),["Forms missing",String(M.length)]],
     sections:[...FORM_TYPES.map(([k,l])=>{const R=L.filter(f=>f.type===k);return {title:l+" forms received ("+R.length+")",head:["Employee","Employee no.",k==="OVERTIME"?"Date":"From",k==="OVERTIME"?"":"To",k==="OVERTIME"?"Hours":"Days","Notes"],rows:R.length?R.map(f=>[f.name,f.number||"",f.start?short(f.start)+" "+yr(f.start):"",f.end&&k!=="OVERTIME"?short(f.end)+" "+yr(f.end):"",String(f.days||""),f.note||""]):[["None received","","","","",""]]}}),
       {title:"Forms missing ("+M.length+")",head:["Employee","Employee no.","Sheet","Type","Days / hours in the register","Dates"],rows:M.length?M.map(x=>[x.e.name,x.e.number||"",x.e.sheet,tName(x.code)+(x.ott?" ("+x.ott+")":""),x.ot?hmOT(x.n)+" h":String(x.n),dRange(x.a,x.b)]):[["No forms missing","","","","",""]]}]}}
@@ -629,7 +629,7 @@ main.addEventListener("click",async ev=>{const t=ev.target.closest("button");if(
   if(t.id==="fmAdd"){FM.open=!FM.open;render();return}
   if(t.id==="fmImp"){const inp=$("fmFile");inp.value="";inp.onchange=()=>{const f=inp.files[0];if(f)importFormsXlsx(f).catch(e=>toast("Couldn't read that file: "+(e.message||e)))};inp.click();return}
   if(t.id==="fmPdf"){pdfSpec(formsSpec(c),t,"Download PDF");return}
-  if(t.id==="fmXls"){try{await loadJs("../lib/xlsx.full.min.js")}catch{}const sp=formsSpec(c),wb=XLSX.utils.book_new();for(const sec of sp.sections){const ws=XLSX.utils.aoa_to_sheet([[sec.title],[],sec.head,...sec.rows]);ws["!cols"]=sec.head.map((_,i)=>({wch:i?16:30}));XLSX.utils.book_append_sheet(wb,ws,sec.title.replace(/[\[\]\*\/\\\?:]/g,"").replace(/\s*\(.*\)$/,"").slice(0,31))}XLSX.writeFile(wb,sp.file+".xlsx");return}
+  if(t.id==="fmXls"){try{await loadJs("../lib/xlsx.full.min.js")}catch{}const sp=formsSpec(c),wb=XLSX.utils.book_new();for(const sec of sp.sections){const ws=XLSX.utils.aoa_to_sheet([[sec.title+" – "+sp.sub],[],sec.head,...sec.rows]);ws["!cols"]=sec.head.map((_,i)=>({wch:i?16:30}));XLSX.utils.book_append_sheet(wb,ws,sec.title.replace(/[\[\]\*\/\\\?:]/g,"").replace(/\s*\(.*\)$/,"").slice(0,31))}saveFile(sp.file+".xlsx",wb);return}
   if(t.dataset.fmdel){if(!canWrite())return;if(!confirm("Remove this form from the list?"))return;FM.list=FM.list.filter(f=>f.id!==t.dataset.fmdel);try{await saveForms(c);toast("Removed")}catch(e){toast("Not saved: "+(e.message||e))}render();return}});
 main.addEventListener("submit",async ev=>{if(ev.target.id!=="formForm")return;ev.preventDefault();const f=ev.target,c=cycleOf(S.date),q=f.emp.value.trim().toLowerCase();
   const e=activeEmps().find(x=>(x.name+" · "+(x.number||"")).toLowerCase()===q)||activeEmps().find(x=>x.name.toLowerCase()===q||String(x.number||"").toLowerCase()===q);
