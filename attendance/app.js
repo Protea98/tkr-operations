@@ -292,10 +292,10 @@ function cycleRows(){const c=cycleOf(S.date);const upto=c.dates.filter(d=>d<=S.d
 /* ---------- the cycle timesheet as a PDF (portrait): every employee, every day, by sheet and group ---------- */
 async function pdfTimesheet(){const btn=$("pdfSheet");btn.disabled=true;btn.textContent="Making the PDF…";
   try{await loadJs("../lib/jspdf.umd.min.js");await loadJs("../lib/jspdf.plugin.autotable.min.js");
-    const c=cycleOf(S.date),upto=c.dates.filter(d=>d<=S.date),es=cycleRows().map(r=>r.e),logo=await logoData(),{jsPDF}=window.jspdf,P=new jsPDF({orientation:"portrait",unit:"mm",format:"a4"}),W=210,GOLD=[212,161,42],BLACK=[17,17,17];
+    const c=cycleOf(S.date),upto=c.dates.filter(d=>d<=S.date),es=cycleRows().map(r=>r.e),logo=await logoData(),{jsPDF}=window.jspdf,P=new jsPDF({orientation:"landscape",unit:"mm",format:"a4"}),W=297,GOLD=[212,161,42],BLACK=[17,17,17];
     if(!es.length){toast("Nobody to put on the timesheet.");return}
     const used={};const ab=v=>{if(!v)return"";if(isTime(v)||isHrs(v))return showMark(v);const t=String(showMark(v)).toUpperCase();if(t.length<=4)return t;const a=t.split(/[\s\/-]+/).filter(Boolean).map(w=>w[0]).join("").slice(0,4);used[a]=t;return a};
-    const half=Math.ceil(c.dates.length/2),parts=[c.dates.slice(0,half),c.dates.slice(half)];
+    const parts=[c.dates];   // landscape: the whole cycle in one table
     const sheetLbl=S.sheet&&S.sheet!=="All"?S.sheet:"All sheets";
     const head=sh=>{P.setFillColor(...BLACK);P.rect(0,0,W,24,"F");P.setFillColor(...GOLD);P.rect(0,24,W,1.4,"F");if(logo)P.addImage(logo,"PNG",10,3.5,17,17);
       P.setTextColor(255,255,255);P.setFont("helvetica","bold");P.setFontSize(14);P.text("TKR OPERATIONS – TIMESHEET",32,11);
@@ -307,12 +307,12 @@ async function pdfTimesheet(){const btn=$("pdfSheet");btn.disabled=true;btn.text
         const body=[];for(const g of S1.groups){body.push([{content:g.label,styles:{fontStyle:"bold",fillColor:[255,242,204]}}].concat(ds.map(d=>{const r=rotaFor(g.id,d);return {content:r?r[0]:"",styles:{fillColor:[255,242,204],textColor:[120,100,60]}}}),last?[{content:"",colSpan:3,styles:{fillColor:[255,242,204]}}]:[]));
           for(const e of g.emps){const t=tally([e],upto),pc=pct(t.present,t.exc);body.push([e.name].concat(ds.map(d=>ab(markOf(e,d))),last?[t.present,t.exc,pc==null?"–":Math.round(pc)+"%"]:[]))}}
         P.setTextColor(...BLACK);P.setFont("helvetica","bold");P.setFontSize(10);P.text(short(ds[0])+" – "+short(ds[ds.length-1]),12,y);
-        P.autoTable({startY:y+2,head:[hd],body,margin:{left:12,right:12,top:30},theme:"grid",styles:{fontSize:5.8,cellPadding:0.8,halign:"center",textColor:BLACK,lineColor:[217,211,197],overflow:"linebreak"},
+        P.autoTable({startY:y+2,head:[hd],body,margin:{left:12,right:12,top:30},theme:"grid",styles:{fontSize:5,cellPadding:0.35,minCellHeight:4.6,valign:"middle",halign:"center",textColor:BLACK,lineColor:[217,211,197],overflow:"linebreak"},
           columnStyles:(()=>{const cs={0:{halign:"left",cellWidth:38,fontSize:6.4}},dw=(W-24-38-(last?28:0))/ds.length;ds.forEach((d,k)=>cs[k+1]={cellWidth:dw});if(last){cs[ds.length+1]={cellWidth:9};cs[ds.length+2]={cellWidth:9};cs[ds.length+3]={cellWidth:10}}return cs})(),headStyles:{fillColor:[38,38,38],textColor:255,fontStyle:"bold"},didDrawPage:()=>head(S1.sheet)});
-        y=P.lastAutoTable.finalY+9;if(y>250&&!last){P.addPage();head(S1.sheet);y=32}}}
+        y=P.lastAutoTable.finalY+9;if(y>170&&!last){P.addPage();head(S1.sheet);y=32}}}
     const key=Object.entries(used).map(([a,t])=>a+" = "+t.toLowerCase()).join("   ·   ");
     const n=P.getNumberOfPages();for(let i=1;i<=n;i++){P.setPage(i);P.setFontSize(7);P.setTextColor(120);P.setFont("helvetica","normal");
-      P.text((key?key+"   ·   ":"")+"Group rows: D day, N night, O off.   Att. = present ÷ (present + AWOP, sick and maternity days), to "+short(upto[upto.length-1]||c.start)+".   Printed "+nice(iso(new Date()))+" "+yr(iso(new Date()))+"   ·   page "+i+" of "+n,12,286,{maxWidth:W-24})}
+      P.text((key?key+"   ·   ":"")+"Group rows: D day, N night, O off.   Att. = present ÷ (present + AWOP, sick and maternity days), to "+short(upto[upto.length-1]||c.start)+".   Printed "+nice(iso(new Date()))+" "+yr(iso(new Date()))+"   ·   page "+i+" of "+n,12,203,{maxWidth:W-24})}
     P.save("TKR Timesheet "+sheetLbl+" "+c.start+" to "+c.end+".pdf");toast("PDF timesheet downloaded")}
   catch(e){console.warn(e);toast("The PDF couldn't be made: "+(e.message||"try again"))}
   btn.disabled=false;btn.textContent="Download PDF timesheet"}
