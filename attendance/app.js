@@ -289,6 +289,33 @@ function dailyText(){const D=dailyData();let s="*TKR Operations – Daily Attend
 const LEAVE_COLS=["ANNUAL LEAVE","SICK","FAMILY RESPONSIBILITY","FAMILY EMERGENCY","STUDY LEAVE","MATERNITY LEAVE"];
 function cycleRows(){const c=cycleOf(S.date);const upto=c.dates.filter(d=>d<=S.date);
   return filtered(c.start).sort((a,b)=>SHEETS.indexOf(a.sheet)-SHEETS.indexOf(b.sheet)||a.order-b.order).map(e=>{const t=tally([e],upto);return {e,t,p:pct(t.present,t.exc)}})}
+/* ---------- the cycle timesheet as a PDF (portrait): every employee, every day, by sheet and group ---------- */
+async function pdfTimesheet(){const btn=$("pdfSheet");btn.disabled=true;btn.textContent="Making the PDF…";
+  try{await loadJs("../lib/jspdf.umd.min.js");await loadJs("../lib/jspdf.plugin.autotable.min.js");
+    const c=cycleOf(S.date),upto=c.dates.filter(d=>d<=S.date),es=cycleRows().map(r=>r.e),logo=await logoData(),{jsPDF}=window.jspdf,P=new jsPDF({orientation:"portrait",unit:"mm",format:"a4"}),W=210,GOLD=[212,161,42],BLACK=[17,17,17];
+    if(!es.length){toast("Nobody to put on the timesheet.");return}
+    const used={};const ab=v=>{if(!v)return"";if(isTime(v)||isHrs(v))return showMark(v);const t=String(showMark(v)).toUpperCase();if(t.length<=4)return t;const a=t.split(/[\s\/-]+/).filter(Boolean).map(w=>w[0]).join("").slice(0,4);used[a]=t;return a};
+    const half=Math.ceil(c.dates.length/2),parts=[c.dates.slice(0,half),c.dates.slice(half)];
+    const sheetLbl=S.sheet&&S.sheet!=="All"?S.sheet:"All sheets";
+    const head=sh=>{P.setFillColor(...BLACK);P.rect(0,0,W,24,"F");P.setFillColor(...GOLD);P.rect(0,24,W,1.4,"F");if(logo)P.addImage(logo,"PNG",10,3.5,17,17);
+      P.setTextColor(255,255,255);P.setFont("helvetica","bold");P.setFontSize(14);P.text("TKR OPERATIONS – TIMESHEET",32,11);
+      P.setTextColor(...GOLD);P.setFontSize(10);P.text(sh+"   ·   Cycle "+short(c.start)+" "+yr(c.start)+" to "+short(c.end)+" "+yr(c.end),32,18.5,{maxWidth:W-40})};
+    let first=true;
+    for(const S1 of bySheetGroup(es)){if(!first)P.addPage();first=false;head(S1.sheet);let y=32;
+      for(const [pi,ds] of parts.entries()){const last=pi===parts.length-1;
+        const hd=["Employee"].concat(ds.map(d=>String(parse(d).getDate())),last?["Pres.","Exc.","Att."]:[]);
+        const body=[];for(const g of S1.groups){body.push([{content:g.label,styles:{fontStyle:"bold",fillColor:[255,242,204]}}].concat(ds.map(d=>{const r=rotaFor(g.id,d);return {content:r?r[0]:"",styles:{fillColor:[255,242,204],textColor:[120,100,60]}}}),last?[{content:"",colSpan:3,styles:{fillColor:[255,242,204]}}]:[]));
+          for(const e of g.emps){const t=tally([e],upto),pc=pct(t.present,t.exc);body.push([e.name].concat(ds.map(d=>ab(markOf(e,d))),last?[t.present,t.exc,pc==null?"–":Math.round(pc)+"%"]:[]))}}
+        P.setTextColor(...BLACK);P.setFont("helvetica","bold");P.setFontSize(10);P.text(short(ds[0])+" – "+short(ds[ds.length-1]),12,y);
+        P.autoTable({startY:y+2,head:[hd],body,margin:{left:12,right:12,top:30},theme:"grid",styles:{fontSize:5.8,cellPadding:0.8,halign:"center",textColor:BLACK,lineColor:[217,211,197],overflow:"linebreak"},
+          columnStyles:(()=>{const cs={0:{halign:"left",cellWidth:38,fontSize:6.4}},dw=(W-24-38-(last?28:0))/ds.length;ds.forEach((d,k)=>cs[k+1]={cellWidth:dw});if(last){cs[ds.length+1]={cellWidth:9};cs[ds.length+2]={cellWidth:9};cs[ds.length+3]={cellWidth:10}}return cs})(),headStyles:{fillColor:[38,38,38],textColor:255,fontStyle:"bold"},didDrawPage:()=>head(S1.sheet)});
+        y=P.lastAutoTable.finalY+9;if(y>250&&!last){P.addPage();head(S1.sheet);y=32}}}
+    const key=Object.entries(used).map(([a,t])=>a+" = "+t.toLowerCase()).join("   ·   ");
+    const n=P.getNumberOfPages();for(let i=1;i<=n;i++){P.setPage(i);P.setFontSize(7);P.setTextColor(120);P.setFont("helvetica","normal");
+      P.text((key?key+"   ·   ":"")+"Group rows: D day, N night, O off.   Att. = present ÷ (present + AWOP, sick and maternity days), to "+short(upto[upto.length-1]||c.start)+".   Printed "+nice(iso(new Date()))+" "+yr(iso(new Date()))+"   ·   page "+i+" of "+n,12,286,{maxWidth:W-24})}
+    P.save("TKR Timesheet "+sheetLbl+" "+c.start+" to "+c.end+".pdf");toast("PDF timesheet downloaded")}
+  catch(e){console.warn(e);toast("The PDF couldn't be made: "+(e.message||"try again"))}
+  btn.disabled=false;btn.textContent="Download PDF timesheet"}
 /* ---------- cycle report as PDF or PowerPoint ---------- */
 const loadJs=src=>new Promise((res,rej)=>{if(document.querySelector('script[src="'+src+'"]'))return res();const t=document.createElement("script");t.src=src;t.onload=res;t.onerror=()=>rej(new Error("Open the app once with signal, then try again."));document.head.appendChild(t)});
 async function logoData(){try{const b=await (await fetch("../icons/logo-96.png")).blob();return await new Promise(r=>{const f=new FileReader();f.onload=()=>r(f.result);f.readAsDataURL(b)})}catch(e){return null}}
@@ -410,7 +437,7 @@ function viewCycle(){const c=cycleOf(S.date);const upto=c.dates.filter(d=>d<=S.d
   if(S.sortLow)rows=rows.slice().sort((a,b)=>(a.p??101)-(b.p??101));
   const all=tally(rows.map(r=>r.e),upto);
   let h=cycleBanner()+chipsBar('<input class="search" id="q" type="search" placeholder="Search name, number or job" value="'+esc(S.q)+'">');
-  h+='<div class="bar"><button class="btn" id="sortLow" aria-pressed="'+S.sortLow+'">'+(S.sortLow?"Show in timesheet order":"Lowest attendance first")+'</button><button class="btn gold" id="xlsCycle">Download Excel timesheet</button><button class="btn gold" id="pdfCycle">Download PDF report</button><button class="btn gold" id="pptCycle">Download PowerPoint report</button></div>';
+  h+='<div class="bar"><button class="btn" id="sortLow" aria-pressed="'+S.sortLow+'">'+(S.sortLow?"Show in timesheet order":"Lowest attendance first")+'</button><button class="btn gold" id="xlsCycle">Download Excel timesheet</button><button class="btn gold" id="pdfCycle">Download PDF report</button><button class="btn gold" id="pdfSheet">Download PDF timesheet</button><button class="btn gold" id="pptCycle">Download PowerPoint report</button></div>';
   h+='<div class="summary">'+stat("Days counted",upto.length+" of "+c.dates.length)+stat("Present days",all.present)+stat("Exception days",all.exc)+stat("Cycle attendance",fmtPct(pct(all.present,all.exc)),"pct")+'</div>';
   h+='<p class="note">'+short(c.start)+' to '+short(upto[upto.length-1]||c.start)+'. Attendance = present days ÷ (present days + exception days). Exceptions are AWOP, sick and maternity leave. Annual leave, family responsibility, family emergency and study leave are not counted as absent. Medical counts as present. Off days are not counted.</p>';
   h+='<div class="tbl-wrap"><table><thead><tr><th>Employee</th><th>Present</th><th>AWOP</th>'+LEAVE_COLS.map(k=>'<th>'+esc(k.replace(" LEAVE","").replace("FAMILY ","FAM. "))+'</th>').join("")+'<th>Off</th><th>Not marked</th><th>Overtime</th><th>Attendance</th></tr></thead><tbody>';
@@ -967,6 +994,7 @@ main.addEventListener("click",ev=>{const t=ev.target.closest("button");if(!t)ret
   if(t.dataset.exp){S.exp.type=t.dataset.exp;if(t.dataset.exp!=="custom")[S.exp.from,S.exp.to]=preset(t.dataset.exp,S.exp.from||S.date);render();return}
   if(t.dataset.htype){(S.hf||(S.hf={type:"All",from:"",to:""})).type=t.dataset.htype;render();return}
   if(t.id==="pdfCycle"){pdfCycle();return}
+  if(t.id==="pdfSheet"){pdfTimesheet();return}
   if(t.id==="pdfDaily"){pdfSpec(dailySpec(),t,"Download PDF report");return}
   if(t.id==="pptDaily"){pptSpec(dailySpec(),t,"Download PowerPoint report");return}
   if(t.id==="pptCycle"){pptCycle();return}
