@@ -261,7 +261,7 @@ function statusBar() {
   const dueAt = last ? last.at + 36e5 : 0, due = !last || Date.now() > dueAt, w = waiting();
   return `<div class="statusbar"><span>Last update <b>${last ? `${new Date(last.at).toTimeString().slice(0, 5)}</b> by ${esc(last.by)}` : "–</b> today"}</span>
     <span>${last ? `Next update by <b>${new Date(dueAt).toTimeString().slice(0, 5)}</b> ` : ""}<span class="${due ? "due" : "ok"}">${due ? "Update due" : "Up to date"}</span></span>
-    <span>${w ? `${w} change${w === 1 ? "" : "s"} waiting for signal` : (sync.last ? `Sent to the TKR app ${new Date(sync.last).toTimeString().slice(0, 5)}` : "Saved on this PC")}</span>
+    <span>${w ? (navigator.onLine && Date.now() - (sync.last || 0) > 3 * 6e4 ? `<span class="due">${w} change${w === 1 ? "" : "s"} not sent since ${sync.last ? new Date(sync.last).toTimeString().slice(0, 5) : "this PC opened"} – reload the page; if it stays, tell the admin</span>` : `${w} change${w === 1 ? "" : "s"} waiting to send`) : (sync.last ? `Sent to the TKR app ${new Date(sync.last).toTimeString().slice(0, 5)}` : "Saved on this PC")}</span>
     <button class="danger" data-logout style="margin-left:auto;min-height:44px">Log out · end shift</button></div>`;
 }
 /* Breakdowns still open from an earlier shift: the new controller confirms each one at the start of the shift */
@@ -1452,10 +1452,11 @@ async function syncNow(manual) {
       await setDoc(doc(db, "ctrl", r.id), clean({ ...(r.kind === "user" ? { ...out, pin } : out), v: 206 })); r.synced = r.editedAt; await tx("readwrite", t => t.objectStore("rec").put(r)); }
       catch (e) { bad++; console.warn("not sent", r.id, e); if (e?.code === "unavailable") throw e; } }   // one record that can't be sent no longer holds back the rest
     const yms = ["setup", shiftMonth(today().slice(0, 7), -1), today().slice(0, 7)]; if (!yms.includes(month)) yms.push(month);
-    const snap = await getDocs(query(collection(db, "ctrl"), where("ym", "in", yms)));
+    const full = !liveOff || liveKey !== yms.join(",") || Date.now() - (sync.fullAt || 0) > 30 * 6e4;   // the live feed brings other PCs' changes the moment they are sent; a full read only every 30 minutes as a check
+    const snap = full ? await getDocs(query(collection(db, "ctrl"), where("ym", "in", yms))) : { docs: [] }; if (full) sync.fullAt = Date.now();
     let n = 0; for (const d of snap.docs) { const r = d.data(), have = recs.find(x => x.id === r.id);
       if (!have || (r.editedAt || 0) > (have.editedAt || 0)) { const nr = { ...r, synced: r.editedAt }; await tx("readwrite", t => t.objectStore("rec").put(nr)); n++; } }
-    recs = await all(); bump(); dutyCheck(); await approvePhumi().catch(() => {}); if (me) { await backfillRigs(); await busUpdate(); await seedFleetReports(); await clearAhead(); await purgeFuture(); await undoDay21(); await restoreDay21(); await busesDown21(); await joinRuns(); await cof22(); await healCells(); await fixNames().catch(e => console.warn(e)); await keepAchieved(); } sync.last = Date.now(); await metaSet("syncLast", sync.last); liveWatch(yms); sync.msg = `Sent and checked ${new Date(Date.now()).toTimeString().slice(0, 5)}${n ? ` · ${n} changes from other devices` : ""}.`;
+    recs = await all(); bump(); dutyCheck(); await approvePhumi().catch(() => {}); if (me) { await backfillRigs(); await busUpdate(); await seedFleetReports(); await clearAhead(); await purgeFuture(); await undoDay21(); await restoreDay21(); await busesDown21(); await joinRuns(); await cof22(); await healCells(); await fixNames().catch(e => console.warn(e)); await keepAchieved(); } sync.bad = bad; if (!bad) { sync.last = Date.now(); await metaSet("syncLast", sync.last); } liveWatch(yms); sync.msg = `Sent and checked ${new Date(Date.now()).toTimeString().slice(0, 5)}${n ? ` · ${n} changes from other devices` : ""}.`;
     if (manual) toast("The TKR app is up to date.");
   } catch (e) { console.warn(e); sync.msg = e?.code === "permission-denied" ? "The TKR app's Firebase rules don't allow the Control Room yet (Muneer publishes them once)." : "Couldn't reach the TKR app. It tries again by itself."; if (manual) toast(sync.msg); }
   sync.busy = false; if (me && !sheetDirty && !document.activeElement?.closest?.("#fDay") && !document.getElementById("evPanel") && !document.querySelector(".sheet:not([hidden])")) render();
@@ -1630,7 +1631,7 @@ function syncCardOld() {
   return `<section class="card"><h2>Send to the TKR app</h2><p style="margin-top:0">Signed in as <b>${esc(fbUser.email)}</b> · ${waiting() ? `<b>${waiting()}</b> changes waiting` : "nothing waiting"}. ${esc(sync.msg)}</p><div class="row"><button class="primary" id="syncNow">Send and check now</button><button class="ghost" id="syncOut">Sign out</button></div></section>`;
 }
 addEventListener("online", () => syncNow(false));
-setInterval(() => { closeCarried().then(n => { if (n && me) render(); }); if (navigator.onLine && !sync.busy) syncNow(false).then(() => { if (me && (tab === "export" || tab === "req")) render(); }); }, 60000);   // keep every PC up to date
+setInterval(() => { closeCarried().then(n => { if (n && me) render(); }); if (navigator.onLine && !sync.busy) syncNow(false).then(() => { if (me && (tab === "export" || tab === "req")) render(); }); }, 20000);   // keep every PC up to date
 setInterval(() => { if (me && (tab === "now" || tab === "day") && !sheetDirty && !document.activeElement?.closest?.("#fDay") && !document.getElementById("evPanel") && !document.querySelector(".sheet:not([hidden])")) render(); }, 60000);   // live times on the board
 
 /* ---------- Excel for one month: the same sheets as the control room workbook ---------- */
