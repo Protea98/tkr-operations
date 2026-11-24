@@ -1455,7 +1455,7 @@ async function syncNow(manual) {
     const snap = await getDocs(query(collection(db, "ctrl"), where("ym", "in", yms)));
     let n = 0; for (const d of snap.docs) { const r = d.data(), have = recs.find(x => x.id === r.id);
       if (!have || (r.editedAt || 0) > (have.editedAt || 0)) { const nr = { ...r, synced: r.editedAt }; await tx("readwrite", t => t.objectStore("rec").put(nr)); n++; } }
-    recs = await all(); bump(); dutyCheck(); await approvePhumi().catch(() => {}); if (me) { await backfillRigs(); await busUpdate(); await seedFleetReports(); await clearAhead(); await purgeFuture(); await undoDay21(); await restoreDay21(); await busesDown21(); await joinRuns(); await cof22(); await healCells(); await keepAchieved(); } sync.last = Date.now(); await metaSet("syncLast", sync.last); liveWatch(yms); sync.msg = `Sent and checked ${new Date(Date.now()).toTimeString().slice(0, 5)}${n ? ` · ${n} changes from other devices` : ""}.`;
+    recs = await all(); bump(); dutyCheck(); await approvePhumi().catch(() => {}); if (me) { await backfillRigs(); await busUpdate(); await seedFleetReports(); await clearAhead(); await purgeFuture(); await undoDay21(); await restoreDay21(); await busesDown21(); await joinRuns(); await cof22(); await healCells(); await fixNames().catch(e => console.warn(e)); await keepAchieved(); } sync.last = Date.now(); await metaSet("syncLast", sync.last); liveWatch(yms); sync.msg = `Sent and checked ${new Date(Date.now()).toTimeString().slice(0, 5)}${n ? ` · ${n} changes from other devices` : ""}.`;
     if (manual) toast("The TKR app is up to date.");
   } catch (e) { console.warn(e); sync.msg = e?.code === "permission-denied" ? "The TKR app's Firebase rules don't allow the Control Room yet (Muneer publishes them once)." : "Couldn't reach the TKR app. It tries again by itself."; if (manual) toast(sync.msg); }
   sync.busy = false; if (me && !sheetDirty && !document.activeElement?.closest?.("#fDay") && !document.getElementById("evPanel") && !document.querySelector(".sheet:not([hidden])")) render();
@@ -1562,6 +1562,18 @@ async function healCells() {
 async function approvePhumi() {
   for (const u of R("user").filter(u => /phum/i.test(u.name || "") && u.status === "pending" && (u.addedAt || 0) < toMs("2026-11-22T06:44")))
     await put({ ...u, status: "approved", decidedBy: "Muneer (admin)", decidedAt: Date.now() }, `Admin approved ${u.name} as a controller`); }
+/* machine names typed wrong on one PC (23/11/2026): their boxes, times and comments go to the right machine */
+const NAME_FIX = { TRK021: "TKR021", TRK09: "TKR09", TRKH020: "TKRH020" };
+async function fixNames() {
+  const keep = undo.slice(); let n = 0;
+  const G = fleet(); if (G.some(([, L]) => L.some(m => NAME_FIX[m]))) { await put({ id: "fleet", kind: "fleet", ym: "setup", groups: G.map(([g, L]) => [g, L.reduce((o, m) => { const t = NAME_FIX[m] || m; if (!o.includes(t)) o.push(t); return o; }, [])]) }, "Machine names corrected: " + Object.entries(NAME_FIX).map(([a, b]) => a + " → " + b).join(", ")); n++; }
+  for (const r of recs.filter(r => r.kind === "hr" && !r.deleted && NAME_FIX[r.machine])) { const to = NAME_FIX[r.machine], id = `hr_${r.date}_${to}`, t = recs.find(x => x.id === id && !x.deleted);
+    const cells = { ...(t?.cells || {}) }, ct = { ...(t?.ct || {}) };
+    for (const [h, v] of Object.entries(r.cells || {})) if (cells[h] == null || (r.ct?.[h] || 0) > (ct[h] || 0)) { cells[h] = v; if (r.ct?.[h]) ct[h] = r.ct[h]; }
+    const meter = { ...(r.meter || {}), ...(t?.meter || {}) }, notes = {}; for (const sh of ["Day", "Night"]) { const a = (t?.notes?.[sh] || "").trim(), b = (r.notes?.[sh] || "").trim(); notes[sh] = a && b && a !== b ? a + "; " + b : a || b; }
+    await put({ ...(t || {}), id, kind: "hr", ym: r.date.slice(0, 7), date: r.date, machine: to, cells, ct, meter, notes }); await put({ ...r, deleted: true }); n++; }
+  for (const e of evs().filter(e => NAME_FIX[e.machine])) { await put({ ...e, machine: NAME_FIX[e.machine], group: groupOf(NAME_FIX[e.machine]) }); n++; }
+  if (n) { undo = keep; await metaSet("undo", undo).catch(() => {}); bump(); } }
 async function busesDown21() {
   const KEY = "seed_buses_down_2026-11-21"; if (recs.some(r => r.id === KEY)) return;
   const keep = undo.slice(), AT = "2026-11-21T06:00";
