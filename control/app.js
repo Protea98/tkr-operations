@@ -1642,7 +1642,7 @@ async function exportBdReport(from, to) {
   r = head(ws, r, ["Group", "Machine", "Available (h:mm)", "Breakdown (h:mm)", "Planned maint. (h:mm)", "Down (h:mm)", "Availability", "Share of all down time", "Hours to next maintenance"]); let k = 0;
   for (const [g, L] of fleet()) { if (!L.length) continue; const T = { avail: 0, BD: 0, PM: 0, down: 0 };
     L.forEach((mc, i) => { const P = per[mc]; for (const x in T) T[x] += P[x]; const tot = P.avail + P.down;
-      r = row(ws, r, tot ? [i ? "" : g, mc, P.avail, P.BD, P.PM, P.down, P.avail / tot, allDown ? P.down / allDown : "–", pmText(mc, to)] : [i ? "" : g, mc, "Not captured", "", "", "", "–", "", pmText(mc, to)], { k: k++, pct: [6, 7], red: [3] }); });   // a machine with no boxes filled is said so, not shown as 0:00
+      r = row(ws, r, tot ? [i ? "" : g, mc, P.avail, P.BD, P.PM, P.down, P.avail / tot, allDown ? P.down / allDown : "–", pmText(mc, to)] : [i ? "" : g, mc, "–", "–", "–", "–", "–", "–", pmText(mc, to)], { k: k++, pct: [6, 7], red: [3] }); });   // a machine with no boxes filled shows hyphens, not 0:00
     const tot = T.avail + T.down; r = row(ws, r, [g + " total", "", T.avail, T.BD, T.PM, T.down, tot ? T.avail / tot : "–", allDown ? T.down / allDown : "–", ""], { bold: true, fill: "FFFFF2CC", pct: [6, 7] }); }
   { const T = M.reduce((a, { mc }) => { for (const x in a) a[x] += per[mc][x]; return a; }, { avail: 0, BD: 0, PM: 0, down: 0 }), tot = T.avail + T.down;
     r = row(ws, r, ["All machines", "", T.avail, T.BD, T.PM, T.down, tot ? T.avail / tot : "–", allDown ? 1 : "–", ""], { bold: true, fill: "FFD4A12A", pct: [6, 7] }); }
