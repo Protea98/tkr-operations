@@ -582,6 +582,16 @@ function hourParts(mc, d, hr, v, inT) {
   else if (v === "BD" || v === "PM") out[v] = out.len;
   if (out.BD + out.PM > out.len) { const k = out.len / (out.BD + out.PM); out.BD *= k; out.PM *= k; }
   return out; }
+/* the clock times a machine was down in a shift, worked out hour by hour exactly like shiftSum counts them */
+function downTimes(mc, d, sh) {
+  const [, b0] = shiftWin(d, sh), H = HRS(sh), C = cellsOf(d, mc), V = H.map(h => cellVal(d, mc, h, C)), iv = [];
+  H.forEach((hr, k) => { const x = hStart(d, hr), y = Math.min(x + 36e5, Date.now(), b0); if (y <= x) return; const v = V[k], inT = k ? V[k - 1] : ""; if (!v || v === "OFF") return;
+    const segs = evSegs(mc, x, y).filter(q => q.t === "BD" || q.t === "PM");
+    if (segs.length) { segs.forEach(q => iv.push({ a: Math.max(q.a, x), b: Math.min(q.b, y), t: q.t }));
+      if (inT === "BD" || inT === "PM") { const f = Math.min(...segs.map(q => q.a)); if (f > x) iv.push({ a: x, b: f, t: inT }); } }
+    else if (v === "BD" || v === "PM") iv.push({ a: x, b: y, t: v }); });
+  iv.sort((p2, q2) => p2.a - q2.a); const out = []; for (const q of iv) { const l = out.at(-1); if (l && q.a - l.b < 6e4) l.b = Math.max(l.b, q.b); else out.push({ ...q }); }
+  return out; }
 function shiftSum(mc, d, sh) {
   const [, b0] = shiftWin(d, sh), H = HRS(sh), C = cellsOf(d, mc), V = H.map(h => cellVal(d, mc, h, C)), filled = V.filter(v => v && v !== "OFF").length;
   let BD = 0, PM = 0, span = 0;
@@ -1627,9 +1637,7 @@ async function exportBdReport(from, to) {
     for (const { g, mc } of M) { if (offShift(mc, d, sh)) continue; const s = shiftSum(mc, d, sh); const P = per[mc]; P.avail += s.avail; P.BD += s.BD; P.PM += s.PM; P.down += s.down; if (s.down <= 0) continue;
       const E = downEvs(mc).filter(e => toMs(e.start) < b0 && evEnd(e) > a0), note = (recs.find(r => r.id === `hr_${d}_${mc}` && !r.deleted)?.notes?.[sh] || "").trim();
       const why = [...new Set([...E.map(e => (e.reason || "").trim()), note].filter(Boolean))].join("; ") || "No reason written";
-      const segs = evSegs(mc, a0, Math.min(b0, now)), runs = []; for (const q of segs) { const l = runs.at(-1); if (l && q.a - l.b < 6e4 && l.t === q.t) l.b = q.b; else runs.push({ ...q }); }
-      let when = runs.map(q => `${tOf(q.a)}–${q.b >= Math.min(b0, now) - 6e4 && b0 > now ? "now" : tOf(q.b)}`).join(", ");
-      if (!when) { const H = HRS(sh), hs = H.filter(h => ["BD", "PM"].includes(cellVal(d, mc, h))); if (hs.length) when = `${tOf(hStart(d, hs[0]))}–${tOf(Math.min(hStart(d, hs.at(-1)) + 36e5, b0))}`; }
+      const when = downTimes(mc, d, sh).map(q => `${tOf(q.a)}–${q.b >= Math.min(b0, now) - 6e4 && b0 > now ? "now" : tOf(q.b)}`).join(", ");   // the same hours the totals count
       const e0 = E.find(e => e.action || e.owner || e.eta) || {};
       lines.push({ d, sh, g, mc, type: s.BD && s.PM ? "Breakdown and maintenance" : s.BD ? "Breakdown" : "Planned maintenance", when, BD: s.BD, PM: s.PM, down: s.down, why, action: e0.action || "", owner: e0.owner || "", eta: e0.eta ? fmt(e0.eta) : "" });
       const key = why.toLowerCase(); const R0 = reasons.get(key) || { why, mcs: new Set(), n: 0, BD: 0, PM: 0, down: 0, t: [] }; R0.mcs.add(mc); R0.n++; R0.t.push(`${mc} ${days.length > 1 ? fmt(d).slice(0, 5) + " " : ""}${when}`); R0.BD += s.BD; R0.PM += s.PM; R0.down += s.down; reasons.set(key, R0); } }
