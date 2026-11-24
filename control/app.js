@@ -1007,7 +1007,7 @@ function reqView() {
 
 /* ---------- add / remove a machine ---------- */
 async function addMachine(gi, raw) {
-  const v = String(raw || "").trim().toUpperCase().replace(/\s+/g, ""); if (!v) { toast("Type the machine number."); return false; }
+  const v = normName(raw); if (!v) { toast("Type the machine number."); return false; }   // TRK021 or tkr 21 becomes TKR021
   const G = fleet().map(([g, L]) => [g, [...L]]); if (G.some(([, L]) => L.includes(v))) { toast(v + " is already on the list."); return false; }
   G[gi][1].push(v); await put({ id: "fleet", kind: "fleet", ym: "setup", groups: G }, `Added machine ${v} to ${G[gi][0]}`); toast(v + " added."); return true;
 }
@@ -1564,15 +1564,23 @@ async function approvePhumi() {
     await put({ ...u, status: "approved", decidedBy: "Muneer (admin)", decidedAt: Date.now() }, `Admin approved ${u.name} as a controller`); }
 /* machine names typed wrong on one PC (23/11/2026): their boxes, times and comments go to the right machine */
 const NAME_FIX = { TRK021: "TKR021", TRK09: "TKR09", TRKH020: "TKRH020" };
+/* the right spelling of a machine number: capitals, no spaces or dashes, TKR / TKRH / TDR / LDV the right way round, the usual number of digits */
+function normName(m) { let v = String(m || "").toUpperCase().replace(/[\s\-_.]+/g, ""); if (NAME_FIX[v]) return NAME_FIX[v];
+  v = v.replace(/^(TRKH|TKHR|THKR|TKRH)(?=\d)/, "TKRH").replace(/^(TRK|TKR|KTR)(?=\d)/, "TKR").replace(/^(TRD|TDR|DTR)(?=\d)/, "TDR").replace(/^(LVD|LDV|DLV)(?=\d)/, "LDV");
+  const mm = v.match(/^(TKRH|TDR|LDV)(\d+)$/); if (mm) v = mm[1] + mm[2].padStart(3, "0");
+  const mk = v.match(/^TKR(\d+)$/); if (mk) v = "TKR" + mk[1].padStart(mk[1].length >= 3 ? 3 : 2, "0");
+  return v; }
+const wrongName = m => normName(m) !== m;
 async function fixNames() {
   const keep = undo.slice(); let n = 0;
-  const G = fleet(); if (G.some(([, L]) => L.some(m => NAME_FIX[m]))) { await put({ id: "fleet", kind: "fleet", ym: "setup", groups: G.map(([g, L]) => [g, L.reduce((o, m) => { const t = NAME_FIX[m] || m; if (!o.includes(t)) o.push(t); return o; }, [])]) }, "Machine names corrected: " + Object.entries(NAME_FIX).map(([a, b]) => a + " → " + b).join(", ")); n++; }
-  for (const r of recs.filter(r => r.kind === "hr" && !r.deleted && NAME_FIX[r.machine])) { const to = NAME_FIX[r.machine], id = `hr_${r.date}_${to}`, t = recs.find(x => x.id === id && !x.deleted);
+  const G = fleet(), bad = [...new Set(G.flatMap(([, L]) => L).filter(wrongName))];
+  if (bad.length || G.some(([, L]) => new Set(L).size !== L.length)) { await put({ id: "fleet", kind: "fleet", ym: "setup", groups: G.map(([g, L]) => [g, L.reduce((o, m) => { const t = normName(m); if (!o.includes(t)) o.push(t); return o; }, [])]) }, "Machine names corrected: " + bad.map(a => a + " → " + normName(a)).join(", ")); n++; }
+  for (const r of recs.filter(r => r.kind === "hr" && !r.deleted && r.machine && wrongName(r.machine))) { const to = normName(r.machine), id = `hr_${r.date}_${to}`, t = recs.find(x => x.id === id && !x.deleted);
     const cells = { ...(t?.cells || {}) }, ct = { ...(t?.ct || {}) };
     for (const [h, v] of Object.entries(r.cells || {})) if (cells[h] == null || (r.ct?.[h] || 0) > (ct[h] || 0)) { cells[h] = v; if (r.ct?.[h]) ct[h] = r.ct[h]; }
     const meter = { ...(r.meter || {}), ...(t?.meter || {}) }, notes = {}; for (const sh of ["Day", "Night"]) { const a = (t?.notes?.[sh] || "").trim(), b = (r.notes?.[sh] || "").trim(); notes[sh] = a && b && a !== b ? a + "; " + b : a || b; }
     await put({ ...(t || {}), id, kind: "hr", ym: r.date.slice(0, 7), date: r.date, machine: to, cells, ct, meter, notes }); await put({ ...r, deleted: true }); n++; }
-  for (const e of evs().filter(e => NAME_FIX[e.machine])) { await put({ ...e, machine: NAME_FIX[e.machine], group: groupOf(NAME_FIX[e.machine]) }); n++; }
+  for (const e of evs().filter(e => e.machine && wrongName(e.machine))) { await put({ ...e, machine: normName(e.machine), group: groupOf(normName(e.machine)) }); n++; }
   if (n) { undo = keep; await metaSet("undo", undo).catch(() => {}); bump(); } }
 async function busesDown21() {
   const KEY = "seed_buses_down_2026-11-21"; if (recs.some(r => r.id === KEY)) return;
