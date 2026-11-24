@@ -474,6 +474,7 @@ function exportView() {
   const m = month, mb = `<div class="mbar"><button data-mnav="-1">‹</button><b>${monthName(m)}</b><button data-mnav="1" ${m >= today().slice(0, 7) ? "disabled" : ""}>›</button></div>`;
   return pageHead("Export and sync", "One file when you need it", "", "", "")
     + `<section class="card dl-card"><h2>Download Excel (date to date)</h2><div class="mhead">${mb}</div><p class="muted">The same sheets as the control room workbook: the invoicing lists, Monthly Availability and one sheet per day with the documents, the day and night shift times, the 24-hour summary and the hourly update log.</p><div class="row" style="align-items:flex-end;margin-top:10px"><label style="flex:1 1 150px">From <input type="date" id="cxFrom" value="${m}-01" max="${today()}"></label><label style="flex:1 1 150px">To <input type="date" id="cxTo" value="${monthEnd(m) < today() ? monthEnd(m) : today()}" max="${today()}"></label><button class="primary" id="xl" style="min-height:52px;flex:1 1 200px">Download Excel for these dates</button></div><p class="muted" style="margin-bottom:0">Pick a month with ‹ › or set your own From and To dates.</p></section>`
+    + `<section class="card dl-card"><h2>Availability and breakdown report (Excel)</h2><p class="muted">Every machine: hours available, breakdown and planned maintenance (h:mm), availability %, each machine's share of all breakdown time, the reasons with their share, and every breakdown shift by shift.</p><div class="row" style="align-items:flex-end;margin-top:10px"><label>From <input type="date" id="brFrom" value="${addDays(today(), -1)}"></label><label>To <input type="date" id="brTo" value="${addDays(today(), -1)}"></label><button class="primary" id="brGo">Download the report</button></div></section>`
     + syncCard()
     + `<section class="card"><h2>Backup</h2><p class="muted" style="margin-top:0">Only needed if this PC never gets signal: save a backup file and load it on another PC.</p><div class="row"><button id="bk">Save a backup file</button><label class="btn" style="display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:10px;padding:8px 14px;cursor:pointer">Load a backup <input type="file" id="rs" accept=".json" hidden></label></div></section>`;
 }
@@ -1305,6 +1306,8 @@ async function clickH(ev) {
   if (b.dataset.rmu) { if (!confirm("Remove yourself from this PC?")) return; const u = recs.find(r => r.id === b.dataset.rmu); await put({ ...u, deleted: true }); me = null; await metaSet("me", null); render(); return; }
   if (b.dataset.discard) { const n = undo.length; if (!n) return; if (!confirm("Discard everything changed since the last Save? The hour boxes, times, reasons and ticks go back to how they were.")) return;
     b.disabled = true; await discardChanges(); sheetDirty = false; render(); toast("Changes discarded. Everything is back to the last Save."); return; }
+  if (b.id === "brGo") { const f = $("brFrom").value, t = $("brTo").value; if (!f || !t || t < f) { toast("Choose a From date before the To date."); return; } b.disabled = true; b.textContent = "Making the Excel file…";
+    try { await exportBdReport(f, t); } catch (e) { console.warn(e); toast("The report couldn't be made: " + (e.message || e)); } b.disabled = false; b.textContent = "Download the report"; return; }
   if (b.id === "xl") { const f = $("cxFrom")?.value || month + "-01", t = $("cxTo")?.value || monthEnd(month); if (t < f) { toast("The To date must be after the From date."); return; }
     b.disabled = true; try { await exportXlsx(f, t); } catch (x) { console.warn(x); toast("The Excel file couldn't be made."); } b.disabled = false; return; }
   if (b.id === "bk") { const blob = new Blob([JSON.stringify({ kind: "tkr-control-backup", at: Date.now(), recs })], { type: "application/json" }); const { deliver } = await import("../lib/deliver.js"); deliver(blob, `TKR_Control_Room_backup_${today()}.json`); return; }
@@ -1592,6 +1595,78 @@ setInterval(() => { closeCarried().then(n => { if (n && me) render(); }); if (na
 setInterval(() => { if (me && (tab === "now" || tab === "day") && !sheetDirty && !document.activeElement?.closest?.("#fDay") && !document.getElementById("evPanel") && !document.querySelector(".sheet:not([hidden])")) render(); }, 60000);   // live times on the board
 
 /* ---------- Excel for one month: the same sheets as the control room workbook ---------- */
+/* ---------- Availability and breakdown report: every machine, the reasons and their share, every breakdown shift by shift ---------- */
+async function exportBdReport(from, to) {
+  await new Promise((res, rej) => { if (window.ExcelJS) return res(); const sc = document.createElement("script"); sc.src = "../lib/exceljs.min.js"; sc.onload = res; sc.onerror = rej; document.head.appendChild(sc); });
+  const wb = new window.ExcelJS.Workbook(); wb.creator = "TKR Operations";
+  let logo = null; try { logo = wb.addImage({ buffer: await (await fetch("../icons/icon-512.png")).arrayBuffer(), extension: "png" }); } catch {}
+  const fill = c => ({ type: "pattern", pattern: "solid", fgColor: { argb: c } }), thin = { style: "thin", color: { argb: "FFD9D3C5" } }, box = { top: thin, left: thin, bottom: thin, right: thin };
+  const F = (o = {}) => Object.assign({ name: "Arial", size: 10 }, o), now = Date.now();
+  const period = from === to ? `${dow(from)} ${fmt(from)}` : `${fmt(from)} to ${fmt(to)}`;
+  const top = (ws, n, t1, t3) => { for (let r = 1; r <= 4; r++) { ws.getRow(r).height = [8, 22, 20, 18][r - 1]; for (let c = 1; c <= n; c++) ws.getCell(r, c).fill = fill("FF111111"); }
+    for (let c = 1; c <= n; c++) ws.getCell(5, c).fill = fill("FFD4A12A"); ws.getRow(5).height = 4; if (logo !== null) ws.addImage(logo, { tl: { col: 0.08, row: 1.1 }, ext: { width: 54, height: 54 } });
+    ws.getCell(2, 2).value = t1; ws.getCell(2, 2).font = F({ size: 15, bold: true, color: { argb: "FFFFFFFF" } }); ws.getCell(3, 2).value = "TKR OPERATIONS  ·  THARISA MINE"; ws.getCell(3, 2).font = F({ size: 9, bold: true, color: { argb: "FFD4A12A" } });
+    ws.getCell(4, 2).value = t3; ws.getCell(4, 2).font = F({ size: 9, color: { argb: "FFCFC8B8" } }); };
+  const band = (ws, r, n, t) => { for (let c = 1; c <= n; c++) ws.getCell(r, c).fill = fill("FFD4A12A"); ws.getCell(r, 1).value = t; ws.getCell(r, 1).font = F({ bold: true, size: 11 }); ws.getRow(r).height = 20; return r + 1; };
+  const head = (ws, r, L) => { L.forEach((t, i) => { const c = ws.getCell(r, i + 1); c.value = t; c.font = F({ bold: true, color: { argb: "FFFFFFFF" } }); c.fill = fill("FF262626"); c.border = box; c.alignment = { wrapText: true, vertical: "middle", horizontal: i < 2 ? "left" : "center" }; }); ws.getRow(r).height = 30; return r + 1; };
+  const row = (ws, r, L, o = {}) => { L.forEach((v, i) => { const c = ws.getCell(r, i + 1); c.value = v === "" || v == null ? null : v; c.border = box; c.font = F({ bold: !!o.bold });
+      c.alignment = { vertical: "middle", wrapText: true, horizontal: i < 2 || (o.left || []).includes(i) ? "left" : "center" };
+      if (typeof v === "number") { if ((o.pct || []).includes(i)) c.numFmt = "0.0%"; else if ((o.int || []).includes(i)) c.numFmt = "0"; else { c.value = v / 24; c.numFmt = "[h]:mm"; } }   // hours as h:mm
+      if (o.fill) c.fill = fill(o.fill); else if (o.k % 2) c.fill = fill("FFFFF8E6");
+      if ((o.red || []).includes(i) && typeof v === "number" && v > 0) c.font = F({ bold: true, color: { argb: "FF9C0006" } }); }); ws.getRow(r).height = o.h || 18; return r + 1; };
+  const chart = (title, labels, vals, color, unit) => { const W = 1000, bh = 26, H = 60 + labels.length * (bh + 8), cv = document.createElement("canvas"); cv.width = W; cv.height = H; const g = cv.getContext("2d");
+    g.fillStyle = "#fff"; g.fillRect(0, 0, W, H); g.fillStyle = "#111"; g.font = "bold 18px Arial"; g.fillText(title, 16, 30); const mx = Math.max(...vals, 0.0001), L0 = 260, W0 = W - L0 - 120;
+    labels.forEach((l, k) => { const y = 50 + k * (bh + 8); g.fillStyle = "#333"; g.font = "14px Arial"; let t = String(l); while (g.measureText(t).width > L0 - 20 && t.length > 3) t = t.slice(0, -2); if (t !== String(l)) t += "…"; g.fillText(t, 16, y + 18);
+      const w = vals[k] / mx * W0; g.fillStyle = color; g.fillRect(L0, y, Math.max(w, vals[k] > 0 ? 2 : 0), bh); g.fillStyle = "#111"; g.font = "bold 14px Arial"; g.fillText(unit(vals[k]), L0 + w + 8, y + 18); });
+    return { png: cv.toDataURL("image/png").split(",")[1], w: W, h: H }; };
+  const days = []; for (let x = from; x <= to && x <= today(); x = addDays(x, 1)) days.push(x);
+  const M = fleet().flatMap(([g, L]) => L.map(mc => ({ g, mc }))), per = {}, lines = [], reasons = new Map();
+  const hmT = h => { const t = Math.round(h * 60); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")}`; };
+  for (const { mc } of M) per[mc] = { avail: 0, BD: 0, PM: 0, down: 0 };
+  for (const d of days) for (const sh of ["Day", "Night"]) { const [a0, b0] = shiftWin(d, sh); if (a0 > now) continue;
+    for (const { g, mc } of M) { if (offShift(mc, d, sh)) continue; const s = shiftSum(mc, d, sh); const P = per[mc]; P.avail += s.avail; P.BD += s.BD; P.PM += s.PM; P.down += s.down; if (s.down <= 0) continue;
+      const E = downEvs(mc).filter(e => toMs(e.start) < b0 && evEnd(e) > a0), note = (recs.find(r => r.id === `hr_${d}_${mc}` && !r.deleted)?.notes?.[sh] || "").trim();
+      const why = [...new Set([...E.map(e => (e.reason || "").trim()), note].filter(Boolean))].join("; ") || "No reason written";
+      const segs = evSegs(mc, a0, Math.min(b0, now)), runs = []; for (const q of segs) { const l = runs.at(-1); if (l && q.a - l.b < 6e4 && l.t === q.t) l.b = q.b; else runs.push({ ...q }); }
+      let when = runs.map(q => `${tOf(q.a)}–${q.b >= Math.min(b0, now) - 6e4 && b0 > now ? "now" : tOf(q.b)}`).join(", ");
+      if (!when) { const H = HRS(sh), hs = H.filter(h => ["BD", "PM"].includes(cellVal(d, mc, h))); if (hs.length) when = `${tOf(hStart(d, hs[0]))}–${tOf(Math.min(hStart(d, hs.at(-1)) + 36e5, b0))}`; }
+      const e0 = E.find(e => e.action || e.owner || e.eta) || {};
+      lines.push({ d, sh, g, mc, type: s.BD && s.PM ? "Breakdown and maintenance" : s.BD ? "Breakdown" : "Planned maintenance", when, BD: s.BD, PM: s.PM, down: s.down, why, action: e0.action || "", owner: e0.owner || "", eta: e0.eta ? fmt(e0.eta) : "" });
+      const key = why.toLowerCase(); const R0 = reasons.get(key) || { why, mcs: new Set(), n: 0, BD: 0, PM: 0, down: 0 }; R0.mcs.add(mc); R0.n++; R0.BD += s.BD; R0.PM += s.PM; R0.down += s.down; reasons.set(key, R0); } }
+  const allDown = M.reduce((a, { mc }) => a + per[mc].down, 0), allBD = M.reduce((a, { mc }) => a + per[mc].BD, 0);
+  // sheet 1: availability per machine and the reasons
+  let ws = wb.addWorksheet("Availability", { views: [{ showGridLines: false }], pageSetup: { orientation: "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: 0, paperSize: 9 } });
+  ws.columns = [16, 14, 14, 14, 16, 14, 14, 16, 18].map(w => ({ width: w }));
+  top(ws, 9, `AVAILABILITY AND BREAKDOWN REPORT – ${period}`, `Day shift 06:00–18:00 and night shift 18:00–06:00 · downloaded ${fmt(today())} ${tOf(now)}`); let r = 7;
+  r = band(ws, r, 9, "Availability per machine");
+  r = head(ws, r, ["Group", "Machine", "Available (h:mm)", "Breakdown (h:mm)", "Planned maint. (h:mm)", "Down (h:mm)", "Availability", "Share of all down time", "Hours to next maintenance"]); let k = 0;
+  for (const [g, L] of fleet()) { if (!L.length) continue; const T = { avail: 0, BD: 0, PM: 0, down: 0 };
+    L.forEach((mc, i) => { const P = per[mc]; for (const x in T) T[x] += P[x]; const tot = P.avail + P.down;
+      r = row(ws, r, tot ? [i ? "" : g, mc, P.avail, P.BD, P.PM, P.down, P.avail / tot, allDown ? P.down / allDown : "–", pmText(mc, to)] : [i ? "" : g, mc, "Not captured", "", "", "", "–", "", pmText(mc, to)], { k: k++, pct: [6, 7], red: [3] }); });   // a machine with no boxes filled is said so, not shown as 0:00
+    const tot = T.avail + T.down; r = row(ws, r, [g + " total", "", T.avail, T.BD, T.PM, T.down, tot ? T.avail / tot : "–", allDown ? T.down / allDown : "–", ""], { bold: true, fill: "FFFFF2CC", pct: [6, 7] }); }
+  { const T = M.reduce((a, { mc }) => { for (const x in a) a[x] += per[mc][x]; return a; }, { avail: 0, BD: 0, PM: 0, down: 0 }), tot = T.avail + T.down;
+    r = row(ws, r, ["All machines", "", T.avail, T.BD, T.PM, T.down, tot ? T.avail / tot : "–", allDown ? 1 : "–", ""], { bold: true, fill: "FFD4A12A", pct: [6, 7] }); }
+  r = row(ws, r, ["Availability = available hours ÷ (available + down hours). Hours are machine hours added together; a machine marked not on site is left out.", ...Array(8).fill("")], { left: [0], h: 28 }); ws.mergeCells(r - 1, 1, r - 1, 9); r++;
+  r = band(ws, r, 9, "Reasons for the breakdowns and maintenance");
+  r = head(ws, r, ["Reason (as written)", "", "Machines", "Times", "Breakdown (h:mm)", "Planned maint. (h:mm)", "Down (h:mm)", "Share of all down time", "Share of breakdown time"]); k = 0;
+  const RS = [...reasons.values()].sort((a, b) => b.down - a.down);
+  for (const R0 of RS) { r = row(ws, r, [R0.why, "", [...R0.mcs].join(", "), R0.n, R0.BD, R0.PM, R0.down, allDown ? R0.down / allDown : "–", allBD ? R0.BD / allBD : "–"], { k: k++, pct: [7, 8], int: [3], left: [0, 2], h: Math.max(18, Math.ceil(R0.why.length / 34) * 13 + 6) }); ws.mergeCells(r - 1, 1, r - 1, 2); }
+  if (!RS.length) { r = row(ws, r, ["No breakdowns or maintenance captured for these dates.", ...Array(8).fill("")], { left: [0] }); ws.mergeCells(r - 1, 1, r - 1, 9); }
+  r++;
+  const withDown = M.filter(({ mc }) => per[mc].down > 0).sort((a, b) => per[b.mc].down - per[a.mc].down);
+  for (const c of [withDown.length && chart("Down time per machine (h:mm)", withDown.map(x => x.mc), withDown.map(x => per[x.mc].down), "#9b2c22", hmT), RS.length && chart("Share of all down time per reason", RS.map(x => x.why), RS.map(x => allDown ? x.down / allDown * 100 : 0), "#d4a12a", v => (Math.round(v * 10) / 10) + "%")].filter(Boolean)) {
+    ws.addImage(wb.addImage({ base64: c.png, extension: "png" }), { tl: { col: 0, row: r }, ext: { width: 900, height: Math.round(900 * c.h / c.w) } }); r += Math.ceil(900 * c.h / c.w / 20) + 2; }
+  // sheet 2: every breakdown shift by shift
+  ws = wb.addWorksheet("Every breakdown", { views: [{ showGridLines: false }], pageSetup: { orientation: "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: 0, paperSize: 9 } });
+  ws.columns = [12, 8, 12, 20, 22, 12, 12, 12, 40, 26, 16, 12].map(w => ({ width: w }));
+  top(ws, 12, `EVERY BREAKDOWN – ${period}`, "Shift by shift, with the times, the reason and the recovery plan"); r = 7;
+  r = head(ws, r, ["Date", "Shift", "Machine", "Type", "Times", "Breakdown (h:mm)", "Planned maint. (h:mm)", "Down (h:mm)", "Reason", "Action", "Who", "ETA"]); k = 0;
+  for (const l of lines.sort((a, b) => a.d.localeCompare(b.d) || (a.sh === "Day" ? -1 : 1) - (b.sh === "Day" ? -1 : 1) || M.findIndex(x => x.mc === a.mc) - M.findIndex(x => x.mc === b.mc)))
+    r = row(ws, r, [fmt(l.d), l.sh, l.mc, l.type, l.when, l.BD, l.PM, l.down, l.why, l.action, l.owner, l.eta], { k: k++, left: [0, 2, 3, 4, 8, 9, 10], h: Math.max(18, Math.ceil(Math.max(l.why.length / 40, l.action.length / 26, l.when.length / 22)) * 13 + 6) });
+  if (!lines.length) r = row(ws, r, ["No breakdowns or maintenance captured for these dates.", ...Array(11).fill("")], { left: [0] });
+  const buf = await wb.xlsx.writeBuffer(), name = `TKR Availability and breakdown report ${from === to ? from : from + " to " + to}.xlsx`;
+  const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" })); a.download = name; document.body.appendChild(a); a.click(); a.remove(); toast("Downloaded " + name);
+}
 async function exportXlsx(from, to) {
   const m = from.slice(0, 7), period = from === m + "-01" && to === monthEnd(m) ? monthName(m) : `${fmt(from)} to ${fmt(to)}`;
   toast("Making the Excel file…");
