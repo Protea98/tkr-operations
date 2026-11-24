@@ -123,8 +123,16 @@ const offAt = (m, t) => (siteRec().off?.[m] || []).some(p => p.from <= t && (!p.
 const offNow = m => offAt(m, Date.now());
 const offShift = (m, d, sh) => { const [a, b] = shiftWin(d, sh); return offAt(m, a) && offAt(m, b - 1); };
 const evEnd = e => e.end ? toMs(e.end) : Date.now();
+/* a whole-hour breakdown made by picking boxes that overlaps times typed in for the same machine is replaced by those times */
+const supersededGrid = g => g.grid && evs().some(e => e.machine === g.machine && !e.grid && e.type === g.type && toMs(e.start) < evEnd(g) && evEnd(e) > toMs(g.start));
+const gridGone = (mc, a) => evs().some(g => g.machine === mc && g.grid && toMs(g.start) <= a && evEnd(g) > a && supersededGrid(g)) && !downEvs(mc).some(e => !e.grid && toMs(e.start) < a + 36e5 && evEnd(e) > a);
+/* boxes picked BD/PM for a run of hours, then the real times typed in on that breakdown: the boxes after the typed back-up time are not down */
+function boxAfterTimes(d, mc, h, C) { const a = hStart(d, h); if (downEvs(mc).some(e => toMs(e.start) < a + 36e5 && evEnd(e) > a)) return false;
+  const H = HRS(h < 18 ? "Day" : "Night"); let k = H.indexOf(h); if (k < 0) return false; const t = C[h];
+  for (k--; k >= 0 && C[H[k]] === t; k--) { const x = hStart(d, H[k]); if (downEvs(mc).some(e => !e.grid && e.type === t && e.end && toMs(e.start) < x + 36e5 && evEnd(e) > x && evEnd(e) <= a)) return true; }
+  return false; }
 function evSegs(machine, from, to) {   // down time inside [from, to): exact times typed in win over whole-hour boxes in the same hour; overlaps joined
-  const E = evs().filter(e => e.machine === machine && toMs(e.start) < to && evEnd(e) > from), exact = E.filter(e => !e.grid), use = exact.length ? exact : E, S = [];
+  const E = evs().filter(e => e.machine === machine && toMs(e.start) < to && evEnd(e) > from && !supersededGrid(e)), exact = E.filter(e => !e.grid), use = exact.length ? exact : E, S = [];
   for (const e of use.sort((p2, q2) => toMs(p2.start) - toMs(q2.start))) { const a = Math.max(toMs(e.start), from), b = Math.min(evEnd(e), to); if (b <= a) continue; const l = S.at(-1);
     if (l && l.t === e.type && a <= l.b) l.b = Math.max(l.b, b); else S.push({ t: e.type, a, b }); }
   return S; }
@@ -554,6 +562,7 @@ function cellVal(d, mc, h, C = cellsOf(d, mc)) {
   if (hStart(d, h) > Date.now()) return "";   // an hour that hasn't started: blank
   if (C[h] === "-") { const a0 = hStart(d, h), ex = downEvs(mc).filter(e => !e.grid && toMs(e.start) < a0 + 36e5 && evEnd(e) > a0);   // cleared box, but exact times were typed in that hour: they show
     return ex.length ? (ex.some(x => x.type === "BD") ? "BD" : "PM") : ""; }
+  if ((C[h] === "BD" || C[h] === "PM") && (gridGone(mc, hStart(d, h)) || boxAfterTimes(d, mc, h, C))) return "OP";   // box picked before the real times were typed in: the times win, the machine was working
   if (C[h]) return C[h];
   const a = hStart(d, h), b = a + 36e5, s0 = shiftWin(d, h < 18 ? "Day" : "Night")[0];
   if (a > Date.now()) return "";
