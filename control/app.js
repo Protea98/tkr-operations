@@ -1632,26 +1632,27 @@ async function exportBdReport(from, to) {
       if (!when) { const H = HRS(sh), hs = H.filter(h => ["BD", "PM"].includes(cellVal(d, mc, h))); if (hs.length) when = `${tOf(hStart(d, hs[0]))}–${tOf(Math.min(hStart(d, hs.at(-1)) + 36e5, b0))}`; }
       const e0 = E.find(e => e.action || e.owner || e.eta) || {};
       lines.push({ d, sh, g, mc, type: s.BD && s.PM ? "Breakdown and maintenance" : s.BD ? "Breakdown" : "Planned maintenance", when, BD: s.BD, PM: s.PM, down: s.down, why, action: e0.action || "", owner: e0.owner || "", eta: e0.eta ? fmt(e0.eta) : "" });
-      const key = why.toLowerCase(); const R0 = reasons.get(key) || { why, mcs: new Set(), n: 0, BD: 0, PM: 0, down: 0 }; R0.mcs.add(mc); R0.n++; R0.BD += s.BD; R0.PM += s.PM; R0.down += s.down; reasons.set(key, R0); } }
+      const key = why.toLowerCase(); const R0 = reasons.get(key) || { why, mcs: new Set(), n: 0, BD: 0, PM: 0, down: 0, t: [] }; R0.mcs.add(mc); R0.n++; R0.t.push(`${mc} ${days.length > 1 ? fmt(d).slice(0, 5) + " " : ""}${when}`); R0.BD += s.BD; R0.PM += s.PM; R0.down += s.down; reasons.set(key, R0); } }
   const allDown = M.reduce((a, { mc }) => a + per[mc].down, 0), allBD = M.reduce((a, { mc }) => a + per[mc].BD, 0);
   // sheet 1: availability per machine and the reasons
   let ws = wb.addWorksheet("Availability", { views: [{ showGridLines: false }], pageSetup: { orientation: "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: 0, paperSize: 9 } });
-  ws.columns = [16, 14, 14, 14, 16, 14, 14, 16, 18].map(w => ({ width: w }));
-  top(ws, 9, `AVAILABILITY AND BREAKDOWN REPORT – ${period}`, `Day shift 06:00–18:00 and night shift 18:00–06:00 · downloaded ${fmt(today())} ${tOf(now)}`); let r = 7;
-  r = band(ws, r, 9, "Availability per machine");
-  r = head(ws, r, ["Group", "Machine", "Available (h:mm)", "Breakdown (h:mm)", "Planned maint. (h:mm)", "Down (h:mm)", "Availability", "Share of all down time", "Hours to next maintenance"]); let k = 0;
+  ws.columns = [16, 14, 14, 14, 16, 14, 14, 16, 18, 44].map(w => ({ width: w }));
+  const timesOf = mc => lines.filter(l => l.mc === mc).map(l => `${days.length > 1 ? fmt(l.d).slice(0, 5) + " " : ""}${l.when}`).join(", ");   // from what time to what time it was down
+  top(ws, 10, `AVAILABILITY AND BREAKDOWN REPORT – ${period}`, `Day shift 06:00–18:00 and night shift 18:00–06:00 · downloaded ${fmt(today())} ${tOf(now)}`); let r = 7;
+  r = band(ws, r, 10, "Availability per machine");
+  r = head(ws, r, ["Group", "Machine", "Available (h:mm)", "Breakdown (h:mm)", "Planned maint. (h:mm)", "Down (h:mm)", "Availability", "Share of all down time", "Hours to next maintenance", "Down from – to"]); let k = 0;
   for (const [g, L] of fleet()) { if (!L.length) continue; const T = { avail: 0, BD: 0, PM: 0, down: 0 };
     L.forEach((mc, i) => { const P = per[mc]; for (const x in T) T[x] += P[x]; const tot = P.avail + P.down;
-      r = row(ws, r, tot ? [i ? "" : g, mc, P.avail, P.BD, P.PM, P.down, P.avail / tot, allDown ? P.down / allDown : "–", pmText(mc, to)] : [i ? "" : g, mc, "–", "–", "–", "–", "–", "–", pmText(mc, to)], { k: k++, pct: [6, 7], red: [3] }); });   // a machine with no boxes filled shows hyphens, not 0:00
-    const tot = T.avail + T.down; r = row(ws, r, [g + " total", "", T.avail, T.BD, T.PM, T.down, tot ? T.avail / tot : "–", allDown ? T.down / allDown : "–", ""], { bold: true, fill: "FFFFF2CC", pct: [6, 7] }); }
+      r = row(ws, r, tot ? [i ? "" : g, mc, P.avail, P.BD, P.PM, P.down, P.avail / tot, allDown ? P.down / allDown : "–", pmText(mc, to), timesOf(mc)] : [i ? "" : g, mc, "–", "–", "–", "–", "–", "–", pmText(mc, to), ""], { k: k++, pct: [6, 7], red: [3], left: [9], h: Math.max(18, Math.ceil(timesOf(mc).length / 42) * 13 + 6) }); });   // a machine with no boxes filled shows hyphens, not 0:00
+    const tot = T.avail + T.down; r = row(ws, r, [g + " total", "", T.avail, T.BD, T.PM, T.down, tot ? T.avail / tot : "–", allDown ? T.down / allDown : "–", "", ""], { bold: true, fill: "FFFFF2CC", pct: [6, 7] }); }
   { const T = M.reduce((a, { mc }) => { for (const x in a) a[x] += per[mc][x]; return a; }, { avail: 0, BD: 0, PM: 0, down: 0 }), tot = T.avail + T.down;
-    r = row(ws, r, ["All machines", "", T.avail, T.BD, T.PM, T.down, tot ? T.avail / tot : "–", allDown ? 1 : "–", ""], { bold: true, fill: "FFD4A12A", pct: [6, 7] }); }
-  r = row(ws, r, ["Availability = available hours ÷ (available + down hours). Hours are machine hours added together; a machine marked not on site is left out.", ...Array(8).fill("")], { left: [0], h: 28 }); ws.mergeCells(r - 1, 1, r - 1, 9); r++;
-  r = band(ws, r, 9, "Reasons for the breakdowns and maintenance");
-  r = head(ws, r, ["Reason (as written)", "", "Machines", "Times", "Breakdown (h:mm)", "Planned maint. (h:mm)", "Down (h:mm)", "Share of all down time", "Share of breakdown time"]); k = 0;
+    r = row(ws, r, ["All machines", "", T.avail, T.BD, T.PM, T.down, tot ? T.avail / tot : "–", allDown ? 1 : "–", "", ""], { bold: true, fill: "FFD4A12A", pct: [6, 7] }); }
+  r = row(ws, r, ["Availability = available hours ÷ (available + down hours). Hours are machine hours added together; a machine marked not on site is left out.", ...Array(9).fill("")], { left: [0], h: 28 }); ws.mergeCells(r - 1, 1, r - 1, 10); r++;
+  r = band(ws, r, 10, "Reasons for the breakdowns and maintenance");
+  r = head(ws, r, ["Reason (as written)", "", "Machines", "Times", "Breakdown (h:mm)", "Planned maint. (h:mm)", "Down (h:mm)", "Share of all down time", "Share of breakdown time", "Down from – to"]); k = 0;
   const RS = [...reasons.values()].sort((a, b) => b.down - a.down);
-  for (const R0 of RS) { r = row(ws, r, [R0.why, "", [...R0.mcs].join(", "), R0.n, R0.BD, R0.PM, R0.down, allDown ? R0.down / allDown : "–", allBD ? R0.BD / allBD : "–"], { k: k++, pct: [7, 8], int: [3], left: [0, 2], h: Math.max(18, Math.ceil(R0.why.length / 34) * 13 + 6) }); ws.mergeCells(r - 1, 1, r - 1, 2); }
-  if (!RS.length) { r = row(ws, r, ["No breakdowns or maintenance captured for these dates.", ...Array(8).fill("")], { left: [0] }); ws.mergeCells(r - 1, 1, r - 1, 9); }
+  for (const R0 of RS) { r = row(ws, r, [R0.why, "", [...R0.mcs].join(", "), R0.n, R0.BD, R0.PM, R0.down, allDown ? R0.down / allDown : "–", allBD ? R0.BD / allBD : "–", R0.t.join(", ")], { k: k++, pct: [7, 8], int: [3], left: [0, 2, 9], h: Math.max(18, Math.ceil(R0.why.length / 34) * 13 + 6, Math.ceil(R0.t.join(", ").length / 42) * 13 + 6) }); ws.mergeCells(r - 1, 1, r - 1, 2); }
+  if (!RS.length) { r = row(ws, r, ["No breakdowns or maintenance captured for these dates.", ...Array(9).fill("")], { left: [0] }); ws.mergeCells(r - 1, 1, r - 1, 10); }
   r++;
   const withDown = M.filter(({ mc }) => per[mc].down > 0).sort((a, b) => per[b.mc].down - per[a.mc].down);
   for (const c of [withDown.length && chart("Down time per machine (h:mm)", withDown.map(x => x.mc), withDown.map(x => per[x.mc].down), "#9b2c22", hmT), RS.length && chart("Share of all down time per reason", RS.map(x => x.why), RS.map(x => allDown ? x.down / allDown * 100 : 0), "#d4a12a", v => (Math.round(v * 10) / 10) + "%")].filter(Boolean)) {
@@ -1660,7 +1661,7 @@ async function exportBdReport(from, to) {
   ws = wb.addWorksheet("Every breakdown", { views: [{ showGridLines: false }], pageSetup: { orientation: "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: 0, paperSize: 9 } });
   ws.columns = [12, 8, 12, 20, 22, 12, 12, 12, 40, 26, 16, 12].map(w => ({ width: w }));
   top(ws, 12, `EVERY BREAKDOWN – ${period}`, "Shift by shift, with the times, the reason and the recovery plan"); r = 7;
-  r = head(ws, r, ["Date", "Shift", "Machine", "Type", "Times", "Breakdown (h:mm)", "Planned maint. (h:mm)", "Down (h:mm)", "Reason", "Action", "Who", "ETA"]); k = 0;
+  r = head(ws, r, ["Date", "Shift", "Machine", "Type", "From – to", "Breakdown (h:mm)", "Planned maint. (h:mm)", "Down (h:mm)", "Reason", "Action", "Who", "ETA"]); k = 0;
   for (const l of lines.sort((a, b) => a.d.localeCompare(b.d) || (a.sh === "Day" ? -1 : 1) - (b.sh === "Day" ? -1 : 1) || M.findIndex(x => x.mc === a.mc) - M.findIndex(x => x.mc === b.mc)))
     r = row(ws, r, [fmt(l.d), l.sh, l.mc, l.type, l.when, l.BD, l.PM, l.down, l.why, l.action, l.owner, l.eta], { k: k++, left: [0, 2, 3, 4, 8, 9, 10], h: Math.max(18, Math.ceil(Math.max(l.why.length / 40, l.action.length / 26, l.when.length / 22)) * 13 + 6) });
   if (!lines.length) r = row(ws, r, ["No breakdowns or maintenance captured for these dates.", ...Array(11).fill("")], { left: [0] });
