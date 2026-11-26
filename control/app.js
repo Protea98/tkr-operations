@@ -1245,7 +1245,7 @@ function openEv(html, title) {
   const ov = document.createElement("div"); ov.id = "evPanel"; ov.className = "sheet"; ov.setAttribute("role", "dialog");
   ov.innerHTML = `<div class="sheet-bar"><button type="button" class="back" data-x>‹ Back</button><b>${title}</b></div><div class="sheet-body">${html}</div>`;
   document.body.appendChild(ov); document.body.classList.add("noscroll");
-  ov.addEventListener("click", clickH); ov.addEventListener("submit", submitH); ov.addEventListener("change", changeH);
+  ov.addEventListener("click", clickH); ov.addEventListener("submit", e => track(submitH(e))); ov.addEventListener("change", e => track(changeH(e)));
 }
 const closeEv = () => { document.getElementById("evPanel")?.remove(); if (!document.querySelector(".sheet:not([hidden])")) document.body.classList.remove("noscroll"); };
 async function backUp(id) {
@@ -1266,19 +1266,40 @@ async function setDuty(on) { if (me?.admin || MNT) return;   // signing in on th
   else if (old && old.sid === me?.sid) await put({ ...old, sid: "", at: 0 }); syncSoon(); }
 function dutyCheck() { const x = dutyLive(); if (!me || !x || x.sid === me.sid) return;
   if (me.admin) return;   // admins sign in beside the controller on duty and are never signed out by them
-  const who = x.name; me = null; metaSet("me", null).catch(() => {}); clearUndo().catch(() => {}); pinFor = null; tab = "now"; closeEv(); render();
+  const who = x.name; keepDraft(me.name); me = null; metaSet("me", null).catch(() => {}); clearUndo().catch(() => {}); pinFor = null; tab = "now"; closeEv(); render();
   popupMsg("Signed out", `${esc(who)} is now on duty in the Control Room${x.admin ? " (admin)" : ""}. Only one person can be signed in at a time, so this PC was signed out.`); }
 setInterval(() => { if (me && dutyRec()?.sid === me.sid) setDuty(true); }, 2 * 6e4);
 async function startSession(u) {
   const x = dutyLive(); if (x && x.user !== u.id && !u.admin) { popupMsg("Someone is on duty", `${esc(x.name)} is signed in to the Control Room on another PC. Only one person can be signed in at a time – they must log out first.`); return false; }
   const sid = "s_" + uid(), start = Date.now(); me = { ...u, sid, start }; await metaSet("me", { id: u.id, admin: !!u.admin, sid, start, until: start + (u.admin ? 12 : 14) * 36e5 });
-  await setDuty(true); return true; }
+  await setDuty(true); setTimeout(restoreDraft, 400); return true; }
+/* logging out, or being signed out, never loses work: the box being typed in is saved, every save still running is finished, an open form is saved,
+   and a form that can't be saved yet (for example a time still missing) is kept on this PC and opened again at the next sign-in */
+const DRAFT_KEY = "tkr-ctl-draft", pend = new Set();
+const track = pr => { pend.add(pr); pr.finally(() => pend.delete(pr)).catch(() => {}); return pr; };
+function formDirty(f) { return [...f.elements].some(e => e.type === "checkbox" || e.type === "radio" ? e.checked !== e.defaultChecked : e.tagName === "SELECT" ? [...e.options].some(o => o.selected !== o.defaultSelected) : e.type !== "file" && e.type !== "hidden" && "value" in e && e.value !== e.defaultValue); }
+function keepDraft(who) { const p = $("evPanel"), f = p?.querySelector("form"); if (!f || !formDirty(f)) return false;
+  for (const e of f.elements) { if (e.type === "checkbox" || e.type === "radio") e.toggleAttribute("checked", e.checked); else if (e.tagName === "SELECT") [...e.options].forEach(o => o.toggleAttribute("selected", o.selected)); else if (e.tagName === "TEXTAREA") e.textContent = e.value; else if (e.type !== "file") e.setAttribute("value", e.value); }
+  try { localStorage.setItem(DRAFT_KEY, JSON.stringify({ who, at: Date.now(), title: p.querySelector(".sheet-bar b")?.textContent || "", html: p.querySelector(".sheet-body").innerHTML })); return true; } catch { return false; } }
+async function flushWork() { const a = document.activeElement; if (a && a !== document.body && a.blur) a.blur();
+  await new Promise(r => setTimeout(r, 150)); await Promise.allSettled([...pend]);
+  const p = $("evPanel"), f = p?.querySelector("form"); if (!f || !formDirty(f)) return "";
+  if (!f.checkValidity()) return keepDraft(me?.name || "") ? "kept" : "";   // a required box still empty: keep it for later rather than save half an entry
+  try { await submitH({ target: f, preventDefault() {} }); } catch {} await Promise.allSettled([...pend]);
+  if ($("evPanel")?.querySelector("form") !== f) return "saved";
+  return keepDraft(me?.name || "") ? "kept" : ""; }
+function restoreDraft() { let x = null; try { x = JSON.parse(localStorage.getItem(DRAFT_KEY) || "null"); localStorage.removeItem(DRAFT_KEY); } catch {} if (!x || !x.html || Date.now() - x.at > 3 * 864e5) return;
+  openEv(x.html, x.title || "Not saved yet"); popupMsg("A form was not saved yet", `${x.who ? esc(x.who) + " was" : "Someone was"} filling this in when they were signed out (${new Date(x.at).toTimeString().slice(0, 5)}). Check it and tap Save, or tap Back to leave it.`); }
+window.addEventListener("pagehide", () => { if (me) { const a = document.activeElement; if (a && a !== document.body && a.blur) a.blur(); keepDraft(me.name); } });
+let loggingOut = false;
 async function logout(swap) {
-  if (!me) return;
+  if (!me || loggingOut) return; loggingOut = true; try { await logout1(swap); } finally { loggingOut = false; } }
+async function logout1(swap) {
   if (!me.admin && !confirm(`${swap ? "Change controller: l" : "L"}og out ${me.name} and end your shift?\n\nYour entries are saved and turn grey (locked). Hour boxes you left empty stay open for the next controller. To change a locked entry later, ask the admin.`)) return;
+  const fw = await flushWork();
   await put({ id: "log_" + uid(), kind: "log", ym: today().slice(0, 7), date: today(), at: Date.now(), what: `${me.name} logged out${me.admin ? "" : " – end of shift"}` });
   await setDuty(false); me = null; pinFor = null; adminStep = ""; addingMe = false; closeEv(); closeSheet(app); await metaSet("me", null); await clearUndo(); tab = "now"; sheetSel = ""; render(); scrollTo(0, 0);
-  toast(swap ? "Logged out. The next controller taps their name, or Add yourself." : "Logged out. Everything is saved on this PC."); syncNow(false);
+  toast(fw === "kept" ? "Logged out. Your open form wasn't finished, so it is kept and opens again at the next sign-in." : swap ? "Logged out. Everything is saved. The next controller taps their name, or Add yourself." : "Logged out. Everything is saved on this PC."); syncNow(false);
 }
 
 /* ---------- change requests: locked entries change only once the admin approves ---------- */
@@ -1771,7 +1792,7 @@ async function changeH(ev) {
   if (t.dataset.addc) { const [it, k] = t.dataset.addc.split("|"), id = addKey(month, it), c = recs.find(r => r.id === id) || { id, kind: "add", ym: month, item: it }; await put({ ...c, [k]: t.value.trim() }, `${it}: ${k}`); toast("Saved"); return; }
   if (t.id === "rs" && t.files[0]) { try { const d = JSON.parse(await t.files[0].text()); let n = 0; for (const r of d.recs || []) { const have = recs.find(x => x.id === r.id); if (!have || (r.editedAt || 0) > (have.editedAt || 0)) { await tx("readwrite", tt => tt.objectStore("rec").put({ ...r, synced: 0 })); n++; } } recs = await all(); bump(); render(); toast(`Backup loaded: ${n} changes added.`); } catch { toast("That file is not a Control Room backup."); } }
 }
-app.addEventListener("click", clickH); app.addEventListener("submit", submitH); app.addEventListener("change", changeH);
+app.addEventListener("click", clickH); app.addEventListener("submit", e => track(submitH(e))); app.addEventListener("change", e => track(changeH(e)));
 app.addEventListener("input", ev => { if (ev.target.id !== "fFind") return; fFind = ev.target.value; clearTimeout(fFind.t); const pos = ev.target.selectionStart; render(); const x = $("fFind"); if (x) { x.focus(); x.setSelectionRange(pos, pos); } }); $("who").addEventListener("click", clickH);
 
 /* ---------- sync with the TKR app when there is signal ---------- */
