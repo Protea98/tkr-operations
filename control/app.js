@@ -3,7 +3,9 @@
    "not in use" are logged with the exact start and end time; the documents checklist and the invoicing lists are
    ticked off. Everything is saved on this device at once, and goes to the TKR app when there is signal. */
 import { tabBar, pageHead, sheet, sheetClick, afterRender, closeSheet, icon } from "../lib/ui.js";
-import { bdData, chartPng } from "../lib/metres-xlsx.js";
+import { bdData, chartPng as chartPng0 } from "../lib/metres-xlsx.js";
+const pngMemo = new Map();   // drawing a graph as a picture is slow: the same graph with the same numbers is drawn once
+const chartPng = (...a) => { const k = JSON.stringify(a); let v = pngMemo.get(k); if (v === undefined) { v = chartPng0(...a); if (pngMemo.size > 60) pngMemo.clear(); pngMemo.set(k, v); } return v; };
 
 const $ = id => document.getElementById(id);
 const app = $("app");
@@ -246,21 +248,23 @@ const mntWaiting = () => { const from = Date.now() - 14 * 864e5; return evs().fi
 const MNT_TABS0 = [["mnt", "Breakdowns and job cards", "settings"], ["pre", "Pre-use checklists", "docs"]];
 let MNT_TABS = MNT_TABS0;
 const tabs = () => { if (MNT) { const n = mntWaiting().length; return MNT_TABS = [["mnt", `Breakdowns and job cards${n ? ` (${n} waiting)` : ""}`, "settings"], MNT_TABS0[1]]; } const n = pendingReqs(); return [TABS[0], TABS[1], ["req", `Change requests${n ? ` (${n})` : ""}`, "missing"], ...TABS.slice(2)]; };
+let lastHtml = "";
 function render() {
   if (MNT && !["mnt", "pre"].includes(tab)) tab = "mnt";
   $("who").innerHTML = me ? `${esc(me.name)} · <button class="sm ghost" data-logout="swap" style="min-height:36px;padding:2px 12px">Change controller</button><button class="sm danger" data-logout style="min-height:36px;padding:2px 12px">Log out</button>` : "";
   if (!me && viewer) { $("who").innerHTML = `Viewing only · <button class="sm" data-unview="1" style="min-height:36px;padding:2px 12px">Controller sign-in</button>`;
     const ws = app.querySelector(".xlsheet")?.scrollTop, wl = app.querySelector(".xlsheet")?.scrollLeft; if (MNT) { if (!["mnt", "pre"].includes(tab)) tab = "mnt"; } else if (tab !== "files") tab = "now";
-    app.innerHTML = MNT ? tabBar(MNT_TABS, tab) + `<div class="ro">${tab === "pre" ? preView() : maintView()}</div>` : tabBar([["now", "Dashboard", "deploy"], ["files", "Documents", "docs"]], tab) + `<div class="ro">${tab === "files" ? filesView() : nowView()}</div>`; afterRender(app);
+    lastHtml = ""; app.innerHTML = MNT ? tabBar(MNT_TABS, tab) + `<div class="ro">${tab === "pre" ? preView() : maintView()}</div>` : tabBar([["now", "Dashboard", "deploy"], ["files", "Documents", "docs"]], tab) + `<div class="ro">${tab === "files" ? filesView() : nowView()}</div>`; afterRender(app);
     const w = app.querySelector(".xlsheet"); if (w && ws != null) { w.scrollTop = ws; w.scrollLeft = wl; } return; }
-  if (!me) { app.innerHTML = `<div class="card viewcard"><b>Just want to see the machines?</b><span class="muted">Anyone can view the live board and the hours. Only controllers can change them.</span><button class="primary" data-view="1">View the dashboard</button></div>` + gateView(); return; }
+  if (!me) { lastHtml = ""; app.innerHTML = `<div class="card viewcard"><b>Just want to see the machines?</b><span class="muted">Anyone can view the live board and the hours. Only controllers can change them.</span><button class="primary" data-view="1">View the dashboard</button></div>` + gateView(); return; }
   let body = "";
   if (tab === "now") body = nowView(); if (tab === "avail") body = availView(); if (tab === "docs") body = docsView(); if (tab === "files") body = filesView();
   if (askMail && me && !me.admin) body = mailToView();
   else if (tab === "req") body = reqView();
   if (tab === "pre") body = preView(); if (tab === "mnt") body = maintView(); if (tab === "inv") body = invView(); if (tab === "export") body = exportView(); if (tab === "settings") body = settingsView();
   const ws = app.querySelector(".xlsheet")?.scrollTop, wl = app.querySelector(".xlsheet")?.scrollLeft, py = scrollY, px = scrollX, XW = [...app.querySelectorAll(".xlwrap,.tbl")].map(e => [e.scrollLeft, e.scrollTop]);
-  app.innerHTML = tabBar(tabs(), tab) + body; afterRender(app);
+  const html = tabBar(tabs(), tab) + body; if (html === lastHtml && app.firstChild) return;   // nothing changed: leave the page as it is (no redraw, no flicker)
+  lastHtml = html; app.innerHTML = html; afterRender(app);
   const w = app.querySelector(".xlsheet"); if (w && ws != null) { w.scrollTop = ws; w.scrollLeft = wl; }
   [...app.querySelectorAll(".xlwrap,.tbl")].forEach((e, i) => { if (XW[i]) { e.scrollLeft = XW[i][0]; e.scrollTop = XW[i][1]; } });
   if (Math.abs(scrollY - py) > 2 || Math.abs(scrollX - px) > 2) scrollTo(px, py);   // the page stays where it was
@@ -425,7 +429,8 @@ function mtrSlots(from, to) { const S = new Map();
   for (const r of R("mtr")) { if (r.ym < from.slice(0, 7) || r.ym > to.slice(0, 7)) continue; let L = []; try { L = JSON.parse(r.data || "[]"); } catch {}
     for (const x of L) if (x.date >= from && x.date <= to) S.set(`${x.date}|${x.shift}|${x.rig}`, x); }
   return S; }
-function dsData(from, to) {
+function dsData(from, to) { const k = `ds|${from}|${to}`; if (lkMemo.has(k)) return lkMemo.get(k); const v = dsData0(from, to); lkMemo.set(k, v); return v; }
+function dsData0(from, to) {
   const a = toMs(from + "T06:00"), b = Math.min(toMs(addDays(to, 1) + "T06:00"), Date.now()), ALL = fleet().flatMap(([, L]) => L);
   const days = []; for (let x = from; x <= to && x <= today(); x = addDays(x, 1)) days.push(x);
   const per = ALL.map(mc => { const t = days.reduce((o, x) => { const z = daySum(mc, x); if (z) for (const k of ["avail", "BD", "PM", "down"]) o[k] += z[k]; return o; }, { avail: 0, BD: 0, PM: 0, down: 0 });
@@ -1792,7 +1797,7 @@ async function changeH(ev) {
   if (t.dataset.addc) { const [it, k] = t.dataset.addc.split("|"), id = addKey(month, it), c = recs.find(r => r.id === id) || { id, kind: "add", ym: month, item: it }; await put({ ...c, [k]: t.value.trim() }, `${it}: ${k}`); toast("Saved"); return; }
   if (t.id === "rs" && t.files[0]) { try { const d = JSON.parse(await t.files[0].text()); let n = 0; for (const r of d.recs || []) { const have = recs.find(x => x.id === r.id); if (!have || (r.editedAt || 0) > (have.editedAt || 0)) { await tx("readwrite", tt => tt.objectStore("rec").put({ ...r, synced: 0 })); n++; } } recs = await all(); bump(); render(); toast(`Backup loaded: ${n} changes added.`); } catch { toast("That file is not a Control Room backup."); } }
 }
-app.addEventListener("click", clickH); app.addEventListener("submit", e => track(submitH(e))); app.addEventListener("change", e => track(changeH(e)));
+app.addEventListener("click", clickH); app.addEventListener("submit", e => track(submitH(e))); app.addEventListener("change", e => { lastHtml = ""; track(changeH(e)); }); app.addEventListener("input", () => { lastHtml = ""; }, true);
 app.addEventListener("input", ev => { if (ev.target.id !== "fFind") return; fFind = ev.target.value; clearTimeout(fFind.t); const pos = ev.target.selectionStart; render(); const x = $("fFind"); if (x) { x.focus(); x.setSelectionRange(pos, pos); } }); $("who").addEventListener("click", clickH);
 
 /* ---------- sync with the TKR app when there is signal ---------- */
@@ -1818,8 +1823,8 @@ async function syncNow(manual) {
       for (let i = 0; i < (r.parts || 1); i++) { const data = await fileGet(`${r.fid}_${i}`); if (!data) { ok = false; break; } await setDoc(doc(db, "ctrl", `file_${r.fid}_${i}`), { kind: "file", ym: "files", data, v: 206 }); }
       if (ok) { r.up = 1; r.editedAt = Date.now(); r.synced = 0; await tx("readwrite", t => t.objectStore("rec").put(r)); } }
     const clean = o => JSON.parse(JSON.stringify(o));   // Firestore refuses empty (undefined) values: one such record used to stop all sending
-    let bad = 0;
-    for (const r of recs.filter(r => !r.synced || r.synced < r.editedAt)) { try { const { synced, pin, ...out } = r;
+    let bad = 0, sentN = 0;
+    for (const r of recs.filter(r => !r.synced || r.synced < r.editedAt)) { sentN++; try { const { synced, pin, ...out } = r;
       let mergedHr = null;
       try { const cur = await fb.getDoc(doc(db, "ctrl", r.id)); if (cur.exists()) { const sv = cur.data();
         if (r.kind === "hr" && !r.deleted && !sv.deleted) { const cells = {}, ct = {}, A = r.cells || {}, B = sv.cells || {}, ta = r.ct || {}, tb = sv.ct || {};   // box by box: the newest change wins, an emptied box stays empty
@@ -1834,10 +1839,10 @@ async function syncNow(manual) {
     const snap = full ? await getDocs(query(collection(db, "ctrl"), where("ym", "in", yms))) : { docs: [] }; if (full) sync.fullAt = Date.now();
     let n = 0; for (const d of snap.docs) { const r = d.data(), have = recs.find(x => x.id === r.id);
       if (!have || (r.editedAt || 0) > (have.editedAt || 0)) { const nr = { ...r, synced: r.editedAt }; await tx("readwrite", t => t.objectStore("rec").put(nr)); n++; } }
-    recs = await all(); bump(); dutyCheck(); await approvePhumi().catch(() => {}); if (me) { await backfillRigs(); await busUpdate(); await seedFleetReports(); await clearAhead(); await purgeFuture(); await undoDay21(); await restoreDay21(); await busesDown21(); await joinRuns(); await cof22(); await seedChats2().catch(e => console.warn(e)); await fixDown26().catch(e => console.warn(e)); await drillsZero().catch(e => console.warn(e)); await seedReports3().catch(e => console.warn(e)); await seedAreas().catch(e => console.warn(e)); await meterFix26().catch(e => console.warn(e)); await seedSvc().catch(e => console.warn(e)); await healCells(); await fixNames().catch(e => console.warn(e)); await keepAchieved(); } sync.bad = bad; if (!bad) { sync.last = Date.now(); await metaSet("syncLast", sync.last); } liveWatch(yms); sync.msg = `Sent and checked ${new Date(Date.now()).toTimeString().slice(0, 5)}${n ? ` · ${n} changes from other devices` : ""}.`;
+    const changed = n || sentN || manual; if (changed) { recs = await all(); bump(); } sync.changed = changed; dutyCheck(); await approvePhumi().catch(() => {}); if (me) { await backfillRigs(); await busUpdate(); await seedFleetReports(); await clearAhead(); await purgeFuture(); await undoDay21(); await restoreDay21(); await busesDown21(); await joinRuns(); await cof22(); await seedChats2().catch(e => console.warn(e)); await fixDown26().catch(e => console.warn(e)); await drillsZero().catch(e => console.warn(e)); await seedReports3().catch(e => console.warn(e)); await seedAreas().catch(e => console.warn(e)); await meterFix26().catch(e => console.warn(e)); await seedSvc().catch(e => console.warn(e)); await healCells(); await fixNames().catch(e => console.warn(e)); await keepAchieved(); } sync.bad = bad; if (!bad) { sync.last = Date.now(); await metaSet("syncLast", sync.last); } liveWatch(yms); sync.msg = `Sent and checked ${new Date(Date.now()).toTimeString().slice(0, 5)}${n ? ` · ${n} changes from other devices` : ""}.`;
     if (manual) toast("The TKR app is up to date.");
   } catch (e) { console.warn(e); sync.msg = e?.code === "permission-denied" ? "The TKR app's Firebase rules don't allow the Control Room yet (Muneer publishes them once)." : "Couldn't reach the TKR app. It tries again by itself."; if (manual) toast(sync.msg); }
-  sync.busy = false; if (canRedraw()) render(); else { clearTimeout(liveT); liveT = setTimeout(function again() { if (canRedraw()) render(); else liveT = setTimeout(again, 3000); }, 3000); }
+  sync.busy = false; if (sync.changed === 0 || sync.changed === false) { sync.changed = null; return; } sync.changed = null; if (canRedraw()) render(); else { clearTimeout(liveT); liveT = setTimeout(function again() { if (canRedraw()) render(); else liveT = setTimeout(again, 3000); }, 3000); }
 }
 /* once: the hours from 01/11/2026 to 25/11/2026 filled in from the Rompad, breakdown report and support fleet WhatsApp groups (asked 26/11/2026).
    A status carries on until the chats report a change. Only empty boxes are filled; anything a controller captured stays. */
@@ -1869,7 +1874,7 @@ async function seedChats2() {
 /* once: TDR013 08:00 on 26/11/2026 was marked operating by mistake (Muneer, 09:26). The drill rigs are not on site, and TKR023 and TKR024 have not been
    repaired, so any of their hours not marked breakdown is put right (drill rigs from 01/11, TKR023 and TKR024 from 12/11, the first support fleet report). */
 async function fixDown26() {
-  const KEY = "seed_fix_down_2026-11-26_1157";   // run again (11:57): TDR013 08:00 was still showing operating on 26/11 if (recs.some(r => r.id === KEY)) return;
+  const KEY = "seed_fix_down_2026-11-26_1157"; if (recs.some(r => r.id === KEY)) return;   // run again (11:57): TDR013 08:00 was still showing operating on 26/11
   const keep = undo.slice(), now = Date.now(), AD = "Admin"; let n = 0;
   for (const [mc, from, why] of [["TDR013", "2026-11-01", "To be decommissioned"], ["TDR014", "2026-11-01", "To be decommissioned"], ["TDR015", "2026-11-01", "To be decommissioned"], ["TKR023", "2026-11-12", "Engine overhaul"], ["TKR024", "2026-11-12", "Drag link needs to be repaired; batteries"]]) {
     for (let d = from; d <= today(); d = addDays(d, 1)) { const id = `hr_${d}_${mc}`, old = recs.find(r => r.id === id && !r.deleted), cells = { ...(old?.cells || {}) }; let ch = false;
@@ -1901,7 +1906,7 @@ async function meterFix26() { const KEY = "seed_meter_fix_2026-11-26"; if (recs.
   await put({ id: KEY, kind: "seed", ym: "setup", at: Date.now(), date: today() }, `Hour meters re-checked against the signed fleet reports by Admin: 07/11 night TKRH015 7066-7072, TKRH017 13138-13145, TKRH020 10644-10650; 08/11 night TKRH020 10656-10662; 12/11 night TKRH019 4458-4467; 16/11 night TKRH021 985-994 (${n} changed)`, AD);
   undo = keep; await metaSet("undo", undo).catch(() => {}); bump(); render(); }
 async function seedReports3() {
-  const KEY = "seed_rb_reports_2026-11-26_v5";   // v5: 10/11 night stops from the breakdown report group;   // v4: the four shifts with no signed sheet (06/11 day, 10/11 night, 15/11 night, 25/11 day) from the WhatsApp openings and closings and the hour meters if (recs.some(r => r.id === KEY)) return;
+  const KEY = "seed_rb_reports_2026-11-26_v5"; if (recs.some(r => r.id === KEY)) return;   // v5: 10/11 night stops from the breakdown report group;   // v4: the four shifts with no signed sheet (06/11 day, 10/11 night, 15/11 night, 25/11 day) from the WhatsApp openings and closings and the hour meters
   const keep = undo.slice(), have = new Set(fleet().flatMap(([, L]) => L)), now = Date.now(), AD = "Admin", MT = {}; let n = 0;
   for (const [d, sh, mc, a, b] of [...FLEET_RB, ...RB_REP]) if (a != null || b != null) MT[`${d}|${sh}|${mc}`] = [a, b];
   for (const [mc, T] of Object.entries(RB_TL)) { if (!have.has(mc)) continue; const P = T.map(([a, b, s, w]) => [toMs(a), toMs(b), s, w]);
@@ -1921,7 +1926,7 @@ async function seedReports3() {
 /* once: where each rockbreaker worked each shift 01/11 to 25/11/2026 (Rompad or Pit project), from the fleet reports and the WhatsApp reports. Done by Admin. */
 const RB_AREA = {"TKRH011":[["2026-11-01|Day","Rompad"]],"TKRH015":[["2026-11-01|Day","Rompad"]],"TKRH017":[["2026-11-01|Day","Pit project"]],"TKRH019":[["2026-11-01|Day","Rompad"],["2026-11-02|Day","Pit project"],["2026-11-11|Night","Rompad"],["2026-11-12|Night","Pit project"],["2026-11-18|Night","Rompad"]],"TKRH020":[["2026-11-01|Day","Rompad"]],"TKRH021":[["2026-11-01|Day","Rompad"]]};
 async function seedAreas() {
-  const KEY = "seed_rb_area_2026-11-26_v2";   // v2: TKRH017 the Pit every shift (fleet reports), TKRH019 in the Pit 02/11 to 18/11; TKRH011 and TKRH020 never if (recs.some(r => r.id === KEY)) return;
+  const KEY = "seed_rb_area_2026-11-26_v2"; if (recs.some(r => r.id === KEY)) return;   // v2: TKRH017 the Pit every shift (fleet reports), TKRH019 in the Pit 02/11 to 18/11; TKRH011 and TKRH020 never
   const keep = undo.slice(), have = new Set(fleet().flatMap(([, L]) => L)); let n = 0;
   for (const [mc, CH] of Object.entries(RB_AREA)) { if (!have.has(mc)) continue; let cur = CH[0][1];
     for (let d = "2026-11-01"; d <= "2026-11-25"; d = addDays(d, 1)) { const id = `hr_${d}_${mc}`, old = recs.find(r => r.id === id && !r.deleted), area = { ...(old?.area || {}) }; let ch = false;
@@ -2389,7 +2394,7 @@ async function checkClock() { try { const r = await fetch(location.href.split("#
     w.innerHTML = `<b class="t">This PC's clock is wrong by ${hm(Math.abs(sk) / 36e5)} (${sk > 0 ? "behind" : "ahead"})</b>The Control Room is using the correct time from the TKR app. Fix the date and time in Windows: Settings → Time & language → Set time automatically.`; app.before(w); } } catch {} }
 (async () => {
   await checkClock(); setInterval(checkClock, 10 * 6e4);
-  try { recs = await all(); bump(); } catch (e) { app.innerHTML = '<div class="notice warn"><b class="t">This browser can\'t store the control room data</b>Open the app in a normal (not private) window.</div>'; return; }
+  try { recs = await all(); bump(); } catch (e) { lastHtml = ""; app.innerHTML = '<div class="notice warn"><b class="t">This browser can\'t store the control room data</b>Open the app in a normal (not private) window.</div>'; return; }
   sync.last = await metaGet("syncLast") || 0;
   if (!(await metaGet("fix113"))) {               // once: drill rigs are TDR013, TDR014, TDR015 only; Muneer's example controller login removed
     const f = R("fleet").sort((a, b) => b.editedAt - a.editedAt)[0];
