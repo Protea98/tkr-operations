@@ -19,7 +19,8 @@ const monthName = m => MONTHS[+m.slice(5, 7) - 1] + " " + m.slice(0, 4);
 const monthEnd = m => ymd(new Date(+m.slice(0, 4), +m.slice(5, 7), 0));
 const shiftMonth = (m, n) => ymd(new Date(+m.slice(0, 4), +m.slice(5, 7) - 1 + n, 1)).slice(0, 7);
 const nowLocal = () => { const d = new Date(Date.now()); return `${ymd(d)}T${pad(d.getHours())}:${pad(d.getMinutes())}`; };
-const toMs = s => { if (!s) return 0; const [d, t] = s.split("T"), [y, m, dd] = d.split("-").map(Number), [h, mi] = (t || "00:00").split(":").map(Number); return new Date(y, m - 1, dd, h, mi).getTime(); };
+const msMemo = new Map();   // the same times are read thousands of times per screen: work each one out once
+const toMs = s => { if (!s) return 0; let v = msMemo.get(s); if (v !== undefined) return v; const [d, t] = s.split("T"), [y, m, dd] = d.split("-").map(Number), [h, mi] = (t || "00:00").split(":").map(Number); v = new Date(y, m - 1, dd, h, mi).getTime(); if (msMemo.size > 50000) msMemo.clear(); msMemo.set(s, v); return v; };
 const hhmm = s => s ? s.slice(11, 16) : "";
 const hm = h => { const t = Math.round(h * 60); return `${Math.floor(t / 60)}:${pad(t % 60)}`; };
 const h2 = h => hm(h || 0);   // hours always shown as hours:minutes
@@ -118,7 +119,7 @@ const groupOf = m => (fleet().find(([, L]) => L.includes(m)) || ["Other"])[0];
 /* ---------- hours: events overlapping a time window ---------- */
 const evs = () => R("ev");
 /* machines not on site: left out of availability, the board, the message and the documents check for that time */
-const siteRec = () => recs.find(r => r.id === "site" && !r.deleted) || { id: "site", kind: "site", ym: "setup", off: {} };
+const siteRec = () => byId("site") || { id: "site", kind: "site", ym: "setup", off: {} };
 const offAt = (m, t) => (siteRec().off?.[m] || []).some(p => p.from <= t && (!p.to || t < p.to));
 const offNow = m => offAt(m, Date.now());
 const offShift = (m, d, sh) => { const [a, b] = shiftWin(d, sh); return offAt(m, a) && offAt(m, b - 1); };
@@ -621,7 +622,7 @@ function daySum(mc, d) {
   return { total: avail + down, avail, BD, PM, SB: 0, NU: 0, down, pct: avail + down > 0 ? avail / (avail + down) : null };
 }
 /* hour meter: opening and closing hours per machine per shift */
-const meterOf = (d, mc, sh) => recs.find(r => r.id === `hr_${d}_${mc}` && !r.deleted)?.meter?.[sh] || {};
+const meterOf = (d, mc, sh) => byId(`hr_${d}_${mc}`)?.meter?.[sh] || {};
 /* hours to next maintenance: the hour meter reading the next maintenance is due at (set by the admin) minus the latest closing reading */
 const pmRec = () => recs.find(r => r.id === "pmnext" && !r.deleted) || null;
 function lastMeter(mc, upTo) { let best = null; for (const r of recs) { if (r.kind !== "hr" || r.deleted || r.machine !== mc || r.date > upTo) continue;
