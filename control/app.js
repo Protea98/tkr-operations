@@ -327,8 +327,11 @@ function hourBoard() {
       else if (dn > 0) { stops.push(`${dc} 0% ${Math.min(pct, up)}%`); pos = Math.min(pct, up); }
       const backUp = SG.length && SG.at(-1).b < Date.now() - 1e3;   // the breakdown has ended: the rest of the hour is working (green)
       if (backUp) { if (pos < 100) stops.push(`${base} ${pos}% 100%`); } else { if (pos < up) stops.push(`${base} ${pos}% ${up}%`); if (up < 100) stops.push(`#202220 ${up}% 100%`); } }
+    const spl = (t === "OP" || t === "SB") && !SG.length ? recs.find(r => r.id === `hr_${d}_${mc}` && !r.deleted)?.sp?.[h] : null;   // OP / RF changed inside the hour: old colour up to that minute
+    if (spl) { const k1 = Math.round((spl.at - x0) / 36e3), pc = spl.v === "SB" ? "#4d4116" : "#1f4d33"; stops.length = 0; stops.push(`${pc} 0% ${k1}%`, `${base} ${k1}% ${cur ? up : 100}%`); if (cur && up < 100) stops.push(`#202220 ${up}% 100%`); }
+    const lbl2 = spl ? `${t === "SB" ? "RF" : "OP"} ${tOf(spl.at)}` : lbl;
     const bg = stops.length ? `style="background:linear-gradient(to right,${stops.join(",")})"` : "";
-    return `<div class="hb ${t}${t === "MIX" ? " " + dt : ""}${cur ? " now" : ""}" ${bg} title="${lab(h)}:00–${lab(h + 1)}:00 · ${dn ? `${dt === "BD" ? "breakdown" : "maintenance"} ${hm(dn)} of ${hm(q.len)}` : v === "SB" ? "refuelling" : "operating"}"><i>${lab(h)}</i><b>${lbl}</b></div>`; };
+    return `<div class="hb ${t}${t === "MIX" ? " " + dt : ""}${cur ? " now" : ""}" ${bg} title="${lab(h)}:00–${lab(h + 1)}:00 · ${dn ? `${dt === "BD" ? "breakdown" : "maintenance"} ${hm(dn)} of ${hm(q.len)}` : v === "SB" ? "refuelling" : "operating"}"><i>${lab(h)}</i><b>${lbl2}</b></div>`; };
   return `<section class="hboard"><div class="hbhead"><h2 class="sect" style="margin:0">This shift hour by hour</h2><span class="muted">${sh} shift ${sh === "Day" ? "06:00 – 18:00" : "18:00 – 06:00"} · ${fmt(d)}</span>
       <span class="hbkey"><span class="hb OP"><b>OP</b></span> Operating <span class="hb SB"><b>RF</b></span> Refuelling <span class="hb BD"><b>BD</b></span> Breakdown <span class="hb PM"><b>PM</b></span> Planned maintenance <span class="hb OFF"><b>OFF</b></span> Not on site</span></div>
     ${fleet().map(([g, L]) => `<div class="hbgrp"><h3>${esc(g)}</h3>${L.map(mc => { const st = stateNow(mc), why = st !== "OP" ? reasonNow(mc) : "";
@@ -648,6 +651,9 @@ function shiftTable(d, sh) {
           for (const g of SG) { const a1 = Math.round((g.a - x0) / 36e3), b1 = Math.round((g.b - x0) / 36e3); if (a1 > pos) stops.push(`${base} ${pos}% ${a1}%`); stops.push(`${LC[g.t] || "#ddd"} ${a1}% ${b1}%`); pos = b1; }
           const ended = SG.at(-1).b < Date.now() - 1e3; if (pos < 100) stops.push(`${ended || y0 <= Date.now() ? base : "#fff"} ${pos}% 100%`);
           st2 = `style="background:linear-gradient(to right,${stops.join(",")})!important;color:#222"`; lb = `<span style="font-size:9.5px;line-height:1.15;display:block">${SG.map(g => `<b>${g.t}</b><br>${tOf(g.a)}–${g.b >= Date.now() - 1e3 ? "now" : tOf(g.b)}`).join("<br>")}</span>`; }
+        const spl = !SG.length && (v === "OP" || v === "SB") ? hr?.sp?.[h] : null;
+        if (spl) { const k1 = Math.round((spl.at - x0) / 36e3), pc = spl.v === "SB" ? "#fff2cc" : "#e2f0d9", nc = v === "SB" ? "#fff2cc" : "#e2f0d9", done = Math.min(100, Math.round((Math.min(y0, Date.now()) - x0) / 36e3));
+          st2 = `style="background:linear-gradient(to right,${pc} 0% ${k1}%,#888 ${k1}% ${k1 + 1}%,${nc} ${k1 + 1}% ${done}%,#fff ${done}% 100%)!important;color:#222"`; lb = `<span style="font-size:9.5px;line-height:1.15;display:block"><b>${spl.v === "SB" ? "RF" : "OP"}</b> → <b>${v === "SB" ? "RF" : "OP"}</b><br>${tOf(spl.at)}</span>`; }
         return `<td class="hc"><button type="button" data-hcell="${esc(mc)}|${h}" data-v="${v}" ${st2} class="hbtn ty ${v}${carry ? " carry" : ""}${auto ? " auto" : ""}" title="${carry ? "Carried on from a breakdown that has not been closed. Tap and pick OP if it was working." : "Tap to pick OP, RF, BD or PM. Tap the same one again to clear it."}">${lb}</button></td>`; }).join("");
       const tm = (e, end) => end ? (e.end ? (toMs(e.end) <= b ? hhmm(e.end) : "") : "") : (toMs(e.start) < a ? tOf(a) : hhmm(e.start));
       body += `<tr data-mach="${esc(mc)}">${i ? "" : `<td rowspan="${L.length}" class="grpc">${esc(g)}</td>`}<td class="lt"><button type="button" class="mbtn" data-mdocs="${esc(mc)}" title="Tap to see and upload the documents for ${esc(mc)}">${esc(mc)}</button></td>${(() => { const m = meterOf(d, mc, sh), lc = lastClose(d, mc, sh), mh = meterHrs(m);
@@ -680,7 +686,9 @@ async function setCell(d, mc, h, val, opt = {}) {
   if (val && hStart(d, h) > Date.now()) { toast("That hour hasn't started yet. Fill it in when it starts."); return; }   // no boxes filled ahead of time
   const id = `hr_${d}_${mc}`, rec = recs.find(r => r.id === id) || { id, kind: "hr", ym: d.slice(0, 7), date: d, machine: mc, cells: {} };
   const a = hStart(d, h), b = a + 36e5, now = Date.now(), current = now >= a && now < b, cells = { ...rec.cells }; if (val) cells[h] = val; else if (a > now) delete cells[h]; else cells[h] = "-";   // a box ahead of time cleared: as if never touched
-  await put({ ...rec, deleted: false, cells }, `${mc} ${hLabel(h)}: ${val || "cleared"}`);
+  const sp = { ...(rec.sp || {}) }, was = ["OP", "SB"].includes(rec.cells?.[h]) ? rec.cells[h] : ["OP", "SB"].includes(opt.prev) ? opt.prev : "";
+  if (current && ["OP", "SB"].includes(val) && was && was !== val && now - a > 6e4) sp[h] = { v: was, at: now }; else if (!val || !current || val !== rec.cells?.[h]) delete sp[h];   // changed inside the running hour: the box shows the old status up to this minute
+  await put({ ...rec, deleted: false, cells, sp }, `${mc} ${hLabel(h)}: ${val || "cleared"}${sp[h] ? ` from ${tOf(now)} (${sp[h].v === "SB" ? "RF" : sp[h].v} before)` : ""}`);
   if (a > now) return;
   if (!val) await clearRest(d, mc, h);
   if (!val && current) {   // cleared in the hour that is running: take away the breakdown or maintenance picked by mistake
@@ -716,6 +724,7 @@ async function setCell(d, mc, h, val, opt = {}) {
     return;
   }
   if (val === "OP" || val === "SB") {
+    if (current && open && (opt.prev === "OP" || opt.prev === "SB") && toMs(open.start) >= a && !lockedV(open, "start")) { await put({ ...open, deleted: true }, `${mc}: ${TYPES[open.type].toLowerCase()} from ${hhmm(open.start)} taken away – it was working`); toast(`${mc}: the ${TYPES[open.type].toLowerCase()} from ${hhmm(open.start)} is taken away.`); return; }
     if (current && open) { await put({ ...open, end: nowLocal(), endBy: me.name }, `${mc} back up ${hhmm(nowLocal())}`); toast(`${mc}: back up logged at ${hhmm(nowLocal())}.`); return; }
     if (open && toMs(open.start) < a) { await put({ ...open, end: isoOf(a), endBy: me.name }); toast(`${mc}: back up at ${tOf(a)}. Tap Back up to type the exact time.`); }
   }
@@ -1231,7 +1240,11 @@ async function viewDoc(id) {
 function cellMenu(btn) {
   document.getElementById("hpop")?.remove(); const v = btn.classList.contains("auto") || btn.classList.contains("carry") ? "" : btn.dataset.v, r = btn.getBoundingClientRect(), pop = document.createElement("div"); pop.id = "hpop"; pop.className = "hpop";
   const LB = { OP: "OP · operating", SB: "RF · refuelling", BD: "BD · breakdown", PM: "PM · maintenance" };
-  pop.innerHTML = ["OP", "SB", "BD", "PM"].map(o => `<button type="button" class="ty ${o}${o === v ? " cur" : ""}" data-hpick="${o}">${LB[o]}${o === v ? " ✓" : ""}</button>`).join("") + `<button type="button" class="clr" data-hpick="">Clear</button>`
+  const [mc0, h0] = btn.dataset.hcell.split("|"), d0 = $("fDay")?.dataset.date || today(), a0 = hStart(d0, +h0), pv = prevHour(d0, +h0), pc = cellVal(pv[0], mc0, pv[1]);
+  const dn = downEvs(mc0).filter(e => toMs(e.start) < a0 && evEnd(e) >= a0 - 6e4).sort((x, y) => toMs(y.start) - toMs(x.start))[0];
+  const def = dn ? dn.type : ["OP", "SB", "BD", "PM"].includes(pc) ? pc : "OP";   // what the machine was doing before this hour, as the app has it
+  pop.innerHTML = `<label style="display:block;font-size:12px;margin:0 2px 8px">Previous status<select id="hPrev" style="display:block;width:100%;margin-top:4px">${[["OP", "Operating"], ["SB", "Refuelling"], ["BD", "Breakdown"], ["PM", "Planned maintenance"]].map(([k, t]) => `<option value="${k}" ${k === def ? "selected" : ""}>${t}</option>`).join("")}</select></label>`
+    + ["OP", "SB", "BD", "PM"].map(o => `<button type="button" class="ty ${o}${o === v ? " cur" : ""}" data-hpick="${o}">${LB[o]}${o === v ? " ✓" : ""}</button>`).join("") + `<button type="button" class="clr" data-hpick="">Clear</button>`
     + (v ? `<small>Tap ${v} again to clear it</small>` : "");
   pop.dataset.cell = btn.dataset.hcell; pop.dataset.cur = v; document.body.appendChild(pop);
   const w = pop.offsetWidth, h = pop.offsetHeight; pop.style.left = scrollX + Math.max(6, Math.min(innerWidth - w - 6, r.left + r.width / 2 - w / 2)) + "px"; pop.style.top = scrollY + (r.bottom + h + 8 > innerHeight ? r.top - h - 4 : r.bottom + 4) + "px";
@@ -1244,20 +1257,11 @@ document.addEventListener("click", async ev => {
     const iso = t => new Date(t - new Date(t).getTimezoneOffset() * 6e4).toISOString().slice(0, 16);
     openEv(evForm({ machine: mc, type: ["BD", "PM", "SB"].includes(cur) ? cur : "PM", start: iso(a), end: iso(Math.min(a + 36e5, Date.now())) }, "").replace('<input type="hidden" name="eid" value="">', `<input type="hidden" name="eid" value=""><input type="hidden" name="hourcell" value="${d}|${mc}|${h}">`), `${mc} · ${hLabel(h)} – part of the hour`);
     toast("Change Started and Ended to the real times. The rest of the hour stays working (green)."); return; }
-  const pg = ev.target.closest("[data-pmgo]");
-  if (pk && pop && pk.dataset.hpick === "PM" && pop.dataset.cur !== "PM") {   // planned maintenance: say what the machine was doing before it
-    const [mc, h0] = pop.dataset.cell.split("|"), d = $("fDay").dataset.date, a = hStart(d, +h0), pv = prevHour(d, +h0), pc = cellVal(pv[0], mc, pv[1]);
-    const def = downEvs(mc).some(e => e.type === "BD" && toMs(e.start) < a && evEnd(e) >= a - 6e4) || pc === "BD" ? "BD" : pc === "SB" ? "SB" : "OP";
-    pop.innerHTML = `<b style="display:block;margin:2px 2px 6px">Planned maintenance</b><label style="display:block;font-size:12px">Previous status<select id="pmPrev" style="display:block;width:100%;margin-top:4px">${[["OP", "Operating"], ["BD", "Breakdown"], ["SB", "Refuelling"]].map(([k, t]) => `<option value="${k}" ${k === def ? "selected" : ""}>${t}</option>`).join("")}</select></label>
-      <button type="button" class="ty PM" data-pmgo style="margin-top:8px">Save planned maintenance</button><small>Breakdown: the breakdown stops where the maintenance starts. Operating or refuelling: a breakdown logged over this hour becomes the maintenance.</small>`; return; }
-  if (pg && pop) { const [mc, h] = pop.dataset.cell.split("|"), prev = $("pmPrev").value, d = $("fDay").dataset.date, a = hStart(d, +h); pop.remove();
-    await setCell(d, mc, +h, "PM", { prev }); const pv = prevHour(d, +h), pr = recs.find(r => r.id === `hr_${pv[0]}_${mc}` && !r.deleted);
-    if (prev === "SB" && hStart(pv[0], pv[1]) >= shiftWin(d, +h < 18 ? "Day" : "Night")[0] && !(pr?.cells?.[pv[1]])) await setCell(pv[0], mc, pv[1], "SB");   // the hour before shows refuelling when nothing was filled in
-    await joinRuns(); render();
-    if (a + 36e5 <= Date.now()) { const e = downEvs(mc).find(x => x.type === "PM" && x.grid && !x.deleted && toMs(x.start) < a + 36e5 && evEnd(x) > a); if (e) { openEv(evForm(e), `${mc} · planned maintenance – type the times`); toast("Type when the maintenance started and ended. The rest of the hour stays green."); } }
-    return; }
-  if (pk && pop) { const [mc, h] = pop.dataset.cell.split("|"), cur = pop.dataset.cur || "", val = pk.dataset.hpick === cur ? "" : pk.dataset.hpick; pop.remove();
-    if (val === cur && pk.dataset.hpick !== "") return; const d = $("fDay").dataset.date, a = hStart(d, +h); await setCell(d, mc, +h, val); await joinRuns(); if (!val) toast(`${mc} ${hLabel(+h)} cleared.`); render();
+  if (pk && pop) { const [mc, h] = pop.dataset.cell.split("|"), cur = pop.dataset.cur || "", val = pk.dataset.hpick === cur ? "" : pk.dataset.hpick, prev = $("hPrev")?.value || ""; pop.remove();
+    if (val === cur && pk.dataset.hpick !== "") return; const d = $("fDay").dataset.date, a = hStart(d, +h); await setCell(d, mc, +h, val, { prev });
+    if (val && prev) { const pv = prevHour(d, +h), pr = recs.find(r => r.id === `hr_${pv[0]}_${mc}` && !r.deleted);   // the hour before shows the previous status when it was left empty
+      if (hStart(pv[0], pv[1]) >= shiftWin(d, +h < 18 ? "Day" : "Night")[0] && !(pr?.cells?.[pv[1]]) && cellVal(pv[0], mc, pv[1]) !== prev) await setCell(pv[0], mc, pv[1], prev, { prev }); }
+    await joinRuns(); if (!val) toast(`${mc} ${hLabel(+h)} cleared.`); render();
     if ((val === "BD" || val === "PM") && a + 36e5 <= Date.now()) {   // an hour already gone: ask the real times straight away so the box shows green / blue or red / green
       const e = downEvs(mc).find(x => x.type === val && x.grid && !x.deleted && toMs(x.start) < a + 36e5 && evEnd(x) > a);
       if (e) { openEv(evForm(e), `${mc} · ${TYPES[val].toLowerCase()} – type the times`); toast("Type when it stopped and when it was back. The rest of the hour stays green."); } }
