@@ -1677,14 +1677,14 @@ async function seedChats2() {
 /* once: TDR013 08:00 on 26/11/2026 was marked operating by mistake (Muneer, 09:26). The drill rigs are not on site, and TKR023 and TKR024 have not been
    repaired, so any of their hours not marked breakdown is put right (drill rigs from 01/11, TKR023 and TKR024 from 12/11, the first support fleet report). */
 async function fixDown26() {
-  const KEY = "seed_fix_down_2026-11-26_0926"; if (recs.some(r => r.id === KEY)) return;
+  const KEY = "seed_fix_down_2026-11-26_1157";   // run again (11:57): TDR013 08:00 was still showing operating on 26/11 if (recs.some(r => r.id === KEY)) return;
   const keep = undo.slice(), now = Date.now(), AD = "Admin"; let n = 0;
   for (const [mc, from, why] of [["TDR013", "2026-11-01", "To be decommissioned"], ["TDR014", "2026-11-01", "To be decommissioned"], ["TDR015", "2026-11-01", "To be decommissioned"], ["TKR023", "2026-11-12", "Engine overhaul"], ["TKR024", "2026-11-12", "Drag link needs to be repaired; batteries"]]) {
     for (let d = from; d <= today(); d = addDays(d, 1)) { const id = `hr_${d}_${mc}`, old = recs.find(r => r.id === id && !r.deleted), cells = { ...(old?.cells || {}) }; let ch = false;
       for (let h = 6; h <= 29; h++) { if (hStart(d, h) > now) break; if (cells[h] !== "BD") { cells[h] = "BD"; ch = true; } }
       if (!ch) continue; n++; const notes = { ...(old?.notes || {}) }; for (const sh of ["Day", "Night"]) if (!(notes[sh] || "").trim()) notes[sh] = why;
       await put({ ...(old || { id, kind: "hr", ym: d.slice(0, 7), date: d, machine: mc }), deleted: false, cells, notes }, null, AD); } }
-  await put({ id: KEY, kind: "seed", ym: "setup", at: now, date: today() }, "TDR013 08:00–09:00 on 26/11 changed from operating to breakdown (captured by mistake). Drill rigs on breakdown every hour from 01/11, TKR023 and TKR024 from 12/11", AD);
+  await put({ id: KEY, kind: "seed", ym: "setup", at: now, date: today() }, "TDR013 08:00–09:00 on 26/11 changed from operating to breakdown (tapped green by mistake). Drill rigs on breakdown every hour from 01/11, TKR023 and TKR024 from 12/11", AD);
   undo = keep; await metaSet("undo", undo).catch(() => {}); bump(); render(); }
 /* once: the drill rigs are not on site, so their hour meter is 0 opening and 0 closing every shift of November 2026 (Muneer, 26/11 10:44) */
 async function drillsZero() {
