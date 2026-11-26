@@ -1492,7 +1492,7 @@ async function syncNow(manual) {
     const snap = full ? await getDocs(query(collection(db, "ctrl"), where("ym", "in", yms))) : { docs: [] }; if (full) sync.fullAt = Date.now();
     let n = 0; for (const d of snap.docs) { const r = d.data(), have = recs.find(x => x.id === r.id);
       if (!have || (r.editedAt || 0) > (have.editedAt || 0)) { const nr = { ...r, synced: r.editedAt }; await tx("readwrite", t => t.objectStore("rec").put(nr)); n++; } }
-    recs = await all(); bump(); dutyCheck(); await approvePhumi().catch(() => {}); if (me) { await backfillRigs(); await busUpdate(); await seedFleetReports(); await clearAhead(); await purgeFuture(); await undoDay21(); await restoreDay21(); await busesDown21(); await joinRuns(); await cof22(); await seedChats2().catch(e => console.warn(e)); await healCells(); await fixNames().catch(e => console.warn(e)); await keepAchieved(); } sync.bad = bad; if (!bad) { sync.last = Date.now(); await metaSet("syncLast", sync.last); } liveWatch(yms); sync.msg = `Sent and checked ${new Date(Date.now()).toTimeString().slice(0, 5)}${n ? ` · ${n} changes from other devices` : ""}.`;
+    recs = await all(); bump(); dutyCheck(); await approvePhumi().catch(() => {}); if (me) { await backfillRigs(); await busUpdate(); await seedFleetReports(); await clearAhead(); await purgeFuture(); await undoDay21(); await restoreDay21(); await busesDown21(); await joinRuns(); await cof22(); await seedChats2().catch(e => console.warn(e)); await fixDown26().catch(e => console.warn(e)); await healCells(); await fixNames().catch(e => console.warn(e)); await keepAchieved(); } sync.bad = bad; if (!bad) { sync.last = Date.now(); await metaSet("syncLast", sync.last); } liveWatch(yms); sync.msg = `Sent and checked ${new Date(Date.now()).toTimeString().slice(0, 5)}${n ? ` · ${n} changes from other devices` : ""}.`;
     if (manual) toast("The TKR app is up to date.");
   } catch (e) { console.warn(e); sync.msg = e?.code === "permission-denied" ? "The TKR app's Firebase rules don't allow the Control Room yet (Muneer publishes them once)." : "Couldn't reach the TKR app. It tries again by itself."; if (manual) toast(sync.msg); }
   sync.busy = false; if (me && !sheetDirty && !document.activeElement?.closest?.("#fDay") && !document.getElementById("evPanel") && !document.querySelector(".sheet:not([hidden])")) render();
@@ -1524,6 +1524,18 @@ async function seedChats2() {
       await put({ id: "log_" + uid(), kind: "log", ym: d.slice(0, 7), date: d, at: st + 5 * 6e4, what: WHAT, seed: 1 }, null, AD); } }
   await put({ id: KEY, kind: "seed", ym: "setup", at: now }, `01/11/2026 to 25/11/2026 captured by Admin from the Rompad, breakdown report and support fleet WhatsApp groups (${n} machine days)`, AD);
   undo = keep; await metaSet("undo", undo).catch(() => {}); bump(); }
+/* once: TDR013 08:00 on 26/11/2026 was marked operating by mistake (Muneer, 09:26). The drill rigs are not on site, and TKR023 and TKR024 have not been
+   repaired, so any of their hours not marked breakdown is put right (drill rigs from 01/11, TKR023 and TKR024 from 12/11, the first support fleet report). */
+async function fixDown26() {
+  const KEY = "seed_fix_down_2026-11-26_0926"; if (recs.some(r => r.id === KEY)) return;
+  const keep = undo.slice(), now = Date.now(), AD = "Admin"; let n = 0;
+  for (const [mc, from, why] of [["TDR013", "2026-11-01", "To be decommissioned"], ["TDR014", "2026-11-01", "To be decommissioned"], ["TDR015", "2026-11-01", "To be decommissioned"], ["TKR023", "2026-11-12", "Engine overhaul"], ["TKR024", "2026-11-12", "Drag link needs to be repaired; batteries"]]) {
+    for (let d = from; d <= today(); d = addDays(d, 1)) { const id = `hr_${d}_${mc}`, old = recs.find(r => r.id === id && !r.deleted), cells = { ...(old?.cells || {}) }; let ch = false;
+      for (let h = 6; h <= 29; h++) { if (hStart(d, h) > now) break; if (cells[h] !== "BD") { cells[h] = "BD"; ch = true; } }
+      if (!ch) continue; n++; const notes = { ...(old?.notes || {}) }; for (const sh of ["Day", "Night"]) if (!(notes[sh] || "").trim()) notes[sh] = why;
+      await put({ ...(old || { id, kind: "hr", ym: d.slice(0, 7), date: d, machine: mc }), deleted: false, cells, notes }, null, AD); } }
+  await put({ id: KEY, kind: "seed", ym: "setup", at: now, date: today() }, "TDR013 08:00–09:00 on 26/11 changed from operating to breakdown (captured by mistake). Drill rigs on breakdown every hour from 01/11, TKR023 and TKR024 from 12/11", AD);
+  undo = keep; await metaSet("undo", undo).catch(() => {}); bump(); render(); }
 async function seedChats() {
   const KEY = "seed_chats_2026-11-26"; if (recs.some(r => r.id === KEY)) return;
   const keep = undo.slice(), have = new Set(fleet().flatMap(([, L]) => L)), now = Date.now(); let n = 0;
