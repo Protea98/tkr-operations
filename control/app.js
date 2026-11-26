@@ -239,7 +239,7 @@ function gateView() {
 }
 
 /* ---------- views ---------- */
-const TABS = [["now", "Live board and workbook", "deploy"], ["files", "Documents", "docs"], ["pre", "Checklists", "docs"], ["inv", "Invoicing", "money"], ["export", "Export & sync", "import"], ["settings", "Settings", "settings"]];
+const TABS = [["now", "Live board and workbook", "deploy"], ["files", "Documents", "docs"], ["pre", "Checklists", "docs"], ["mnt", "Maintenance", "settings"], ["inv", "Invoicing", "money"], ["export", "Export & sync", "import"], ["settings", "Settings", "settings"]];
 const pendingReqs = () => R("req").filter(q => q.status === "pending").length + R("user").filter(u => u.status === "pending").length;
 const tabs = () => { const n = pendingReqs(); return [TABS[0], TABS[1], ["req", `Change requests${n ? ` (${n})` : ""}`, "missing"], ...TABS.slice(2)]; };
 function render() {
@@ -253,7 +253,7 @@ function render() {
   if (tab === "now") body = nowView(); if (tab === "avail") body = availView(); if (tab === "docs") body = docsView(); if (tab === "files") body = filesView();
   if (askMail && me && !me.admin) body = mailToView();
   else if (tab === "req") body = reqView();
-  if (tab === "pre") body = preView(); if (tab === "inv") body = invView(); if (tab === "export") body = exportView(); if (tab === "settings") body = settingsView();
+  if (tab === "pre") body = preView(); if (tab === "mnt") body = maintView(); if (tab === "inv") body = invView(); if (tab === "export") body = exportView(); if (tab === "settings") body = settingsView();
   const ws = app.querySelector(".xlsheet")?.scrollTop, wl = app.querySelector(".xlsheet")?.scrollLeft, py = scrollY, px = scrollX, XW = [...app.querySelectorAll(".xlwrap,.tbl")].map(e => [e.scrollLeft, e.scrollTop]);
   app.innerHTML = tabBar(tabs(), tab) + body; afterRender(app);
   const w = app.querySelector(".xlsheet"); if (w && ws != null) { w.scrollTop = ws; w.scrollLeft = wl; }
@@ -794,6 +794,52 @@ function svcForm(mc) { const L = lastSvc(mc), { d, sh } = shiftNow(), m = meterO
     <label>Service <input name="n" placeholder="e.g. 250 h service, 1000 h service" value=""></label></div>
     <button class="primary" style="width:100%;min-height:52px;margin-top:12px">Save service</button></form>
     <h4 style="margin-top:16px">Services logged</h4>${H.length ? `<table class="mini"><tbody>${H.map(x => `<tr><td>${fmt(x.date)}</td><td>${mtxt(x.reading)}</td><td>${esc(x.note || "")}</td><td>${esc(x.by || "")}</td></tr>`).join("")}</tbody></table>` : '<p class="muted">-</p>'}`; }
+/* ---------- Maintenance: every breakdown and planned maintenance with its job card, quotation and requisition ---------- */
+const MDOCS = ["Job card", "Quotation", "Requisition"];
+let mntDay = null;
+async function storeDocs(files, { m, t, d, sh, ev }) { let n = 0;
+  for (const file of files) { try { const photo = /^image\/(jpeg|png|webp|bmp)$/.test(file.type); if (!photo && file.size > 15 * 1024 * 1024) { toast(file.name + " is bigger than 15 MB."); continue; }
+      let data = photo ? await shrinkImg(file).catch(() => "") : ""; const mime = data ? "image/jpeg" : (file.type || mimeOf(file.name)); if (!data) data = await dataUrlOf(new Blob([file], { type: mime }));
+      const fid = uid(), parts = Math.max(1, Math.ceil(data.length / 700000)); for (let i = 0; i < parts; i++) await fileSet(`${fid}_${i}`, data.slice(i * 700000, (i + 1) * 700000));
+      await put({ id: "doc_" + fid, kind: "doc", ym: d.slice(0, 7), date: d, shift: sh, machine: m, group: groupOf(m), type: t, name: data.startsWith("data:image/jpeg") && photo && !/\.jpe?g$/i.test(file.name) ? file.name.replace(/\.[^.]+$/, "") + ".jpg" : file.name, mime, fid, parts, size: Math.round(data.length * 0.75), ...(ev ? { ev } : {}) }, `${t} uploaded for ${m} (${fmt(d).slice(0, 5)} ${sh})`); n++; }
+    catch (e) { console.warn(e); toast(file.name + " couldn't be read."); } }
+  return n; }
+const shOf = ms => { const h = new Date(ms).getHours(); return h >= 6 && h < 18 ? "Day" : "Night"; };
+const dayOfMs = ms => { const t = new Date(ms); if (t.getHours() < 6) t.setDate(t.getDate() - 1); return ymd(t); };
+/* breakdowns and maintenance that touch a day (06:00 to 06:00), one line per stop */
+function mntEvents(d) { const a = hStart(d, 6), b = a + 864e5;
+  return evs().filter(e => (e.type === "BD" || e.type === "PM") && !e.deleted && toMs(e.start) < b && evEnd(e) > a).sort((x, y) => toMs(x.start) - toMs(y.start)); }
+const mntDocs = (e, d) => R("doc").filter(x => MDOCS.includes(x.type) && (x.ev === e.id || (!x.ev && x.machine === e.machine && x.date === d)));
+const mntDocsDay = d => R("doc").filter(x => MDOCS.includes(x.type) && (x.date === d || mntEvents(d).some(e => x.ev === e.id)));
+function maintView() { const d = mntDay || today(), E = mntEvents(d), all = mntDocsDay(d), jc = all.filter(x => x.type === "Job card");
+  const miss = E.filter(e => !mntDocs(e, d).some(x => x.type === "Job card"));
+  return pageHead("Control room", "Maintenance", "Every breakdown and planned maintenance with its job card, quotation and requisition", `<button class="primary" data-mntzip="Job card">Download job cards for ${fmt(d).slice(0, 5)} (${jc.length})</button> <button data-mntzip="">Download all maintenance documents (${all.length})</button>`)
+    + `<div class="dnav"><button data-mntday="-1" aria-label="Day before">‹</button><input type="date" id="mntPick" value="${d}" max="${today()}"><button data-mntday="1" aria-label="Next day" ${d >= today() ? "disabled" : ""}>›</button></div>`
+    + `<div class="tiles ctiles"><div class="tile ${E.filter(e => e.type === "BD").length ? "alert" : ""}"><div class="l">Breakdowns</div><div class="n">${E.filter(e => e.type === "BD").length}</div><div class="s">${fmt(d)}</div></div>
+      <div class="tile"><div class="l">Planned maintenance</div><div class="n">${E.filter(e => e.type === "PM").length}</div><div class="s">${fmt(d)}</div></div>
+      <div class="tile ${miss.length ? "alert" : "good"}"><div class="l">Job cards</div><div class="n">${E.length - miss.length}<small>/${E.length}</small></div><div class="s">${miss.length ? "missing: " + [...new Set(miss.map(e => e.machine))].map(esc).join(", ") : "all in"}</div></div>
+      <div class="tile"><div class="l">Quotations · requisitions</div><div class="n">${all.filter(x => x.type === "Quotation").length} · ${all.filter(x => x.type === "Requisition").length}</div><div class="s">uploaded for this day</div></div></div>`
+    + `<section class="card"><table class="mini mnt"><thead><tr><th>Machine</th><th>Type</th><th>From – to</th><th>Reason</th>${MDOCS.map(t => `<th>${t}</th>`).join("")}</tr></thead><tbody>${E.map(e => { const D = mntDocs(e, d), a = toMs(e.start), sh = shOf(Math.max(a, hStart(d, 6)));
+      return `<tr class="${e.type === "BD" ? "bad" : ""}"><td><b>${esc(e.machine)}</b></td><td>${e.type === "BD" ? "Breakdown" : "Planned maintenance"}</td><td>${fmt(e.start.slice(0, 10)).slice(0, 5)} ${hhmm(e.start)} – ${e.end ? fmt(e.end.slice(0, 10)).slice(0, 5) + " " + hhmm(e.end) : "still down"}</td><td>${esc(e.reason || hrNote(e) || "-")}</td>
+        ${MDOCS.map(t => { const X = D.filter(x => x.type === t); return `<td>${X.map(x => `<button class="sm ghost" data-dview="${esc(x.id)}" title="${esc(x.name)}">✓ ${esc(t)}</button>`).join(" ")}${me ? `<button class="sm${t === "Job card" && !X.length ? " primary" : ""}" data-mntup="${esc(e.id)}|${t}|${d}|${sh}">+ ${t === "Job card" ? "job card" : t.toLowerCase()}</button>` : ""}</td>`; }).join("")}</tr>`; }).join("") || `<tr><td colspan="7">No breakdowns or planned maintenance logged for ${fmt(d)}.</td></tr>`}</tbody></table></section>`; }
+const hrNote = e => { const d = dayOfMs(toMs(e.start)), sh = shOf(toMs(e.start)); return (byId(`hr_${d}_${e.machine}`)?.notes?.[sh] || "").trim(); };
+function mntForm(evId, t, d, sh) { const e = recs.find(x => x.id === evId) || {};
+  return `<form id="fMnt" class="form" data-ev="${esc(evId)}" data-m="${esc(e.machine || "")}" data-d="${d}" data-sh="${sh}"><p class="muted" style="margin-top:0">${esc(e.machine || "")} · ${e.type === "BD" ? "breakdown" : "planned maintenance"} ${e.start ? fmt(e.start.slice(0, 10)).slice(0, 5) + " " + hhmm(e.start) : ""}${e.reason ? " · " + esc(e.reason) : ""}</p>
+    ${MDOCS.map(x => `<label class="pick" style="display:flex;flex-direction:column;gap:6px;margin-top:10px">${x} <input type="file" name="${x}" multiple accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx" ${x === t ? "autofocus" : ""}></label>`).join("")}
+    <button class="primary" style="width:100%;min-height:52px;margin-top:14px">Save</button></form>`; }
+async function saveMnt(f) { const ev = f.dataset.ev, m = f.dataset.m, d = f.dataset.d, sh = f.dataset.sh, btn = f.querySelector("button.primary"); let n = 0; btn.disabled = true; btn.textContent = "Saving…";
+  for (const t of MDOCS) { const files = [...(f.elements[t]?.files || [])]; if (files.length) n += await storeDocs(files, { m, t, d, sh, ev }); }
+  closeEv(); render(); toast(n ? `${n} document${n === 1 ? "" : "s"} saved for ${m}.` : "Nothing chosen."); }
+async function mntZip(d, only) { const L = mntDocsDay(d).filter(x => !only || x.type === only); if (!L.length) { toast(`No ${only ? only.toLowerCase() + "s" : "maintenance documents"} for ${fmt(d)} yet.`); return; }
+  await new Promise((res, rej) => { if (window.JSZip) return res(); const sc = document.createElement("script"); sc.src = "../lib/jszip.min.js"; sc.onload = res; sc.onerror = rej; document.head.appendChild(sc); });
+  const zip = new window.JSZip(), root = `${only ? only + "s" : "Maintenance documents"} ${fmt(d).replace(/\//g, "-")}`; let n = 0, skip = 0;
+  for (const r of L) { const x = await docData(r); if (!x) { skip++; continue; } zip.file(`${root}/${r.machine}/${docName(r)}`, x.split(",")[1], { base64: true }); n++; }
+  if (!n) { toast("These documents are on another PC. Try again with signal."); return; }
+  const { deliver } = await import("../lib/deliver.js"); deliver(await zip.generateAsync({ type: "blob" }), `${root.replace(/\s+/g, "_")}.zip`); toast(`${n} downloaded${skip ? ` · ${skip} not on this PC yet` : ""}.`); }
+/* after a breakdown or maintenance is logged: a bar offering the job card, quotation and requisition (no need to tap it) */
+function mntNudge(evId) { const e = recs.find(x => x.id === evId); if (!e || !me) return; document.getElementById("mntBar")?.remove(); const a = toMs(e.start), d = dayOfMs(a), sh = shOf(a);
+  const b = document.createElement("div"); b.id = "mntBar"; b.className = "mntbar"; b.innerHTML = `<span>${esc(e.machine)} ${e.type === "BD" ? "breakdown" : "maintenance"} logged. Upload the job card, quotation or requisition?</span><button class="sm primary" data-mntup="${esc(e.id)}|Job card|${d}|${sh}">Upload</button><button class="sm ghost" data-mntclose="">Later</button>`;
+  b.addEventListener("click", clickH); document.body.appendChild(b); clearTimeout(mntNudge.t); mntNudge.t = setTimeout(() => b.remove(), 15000); }
 function firstDay(mc) { const k = "first|" + mc; if (lkMemo.has(k)) return lkMemo.get(k); let f = today();
   for (const r of recs) if (r.kind === "hr" && !r.deleted && r.machine === mc && r.date < f && (Object.values(r.cells || {}).some(v => v && v !== "-") || Object.values(r.meter || {}).some(m => meterHrs(m) != null))) f = r.date;
   for (const e of downEvs(mc)) { const d0 = String(e.start).slice(0, 10); if (d0 < f) f = d0; } lkMemo.set(k, f); return f; }
@@ -1241,7 +1287,7 @@ function mailForm(e) {
 }
 
 /* ---------- documents per machine per shift (job cards, checklists…), kept on this PC and sent when there is signal ---------- */
-const DOC_TYPES = ["Fleet report", "Job card", "Checklist", "Tally sheet", "Trip summary", "Breakdown report", "Other"];
+const DOC_TYPES = ["Fleet report", "Job card", "Quotation", "Requisition", "Checklist", "Tally sheet", "Trip summary", "Breakdown report", "Other"];
 const NEEDS = { "Drill rigs": ["Checklist", "Tally sheet"], "Rockbreakers": ["Checklist"], "Buses": ["Checklist", "Trip summary"], "Lowbed": ["Checklist", "Trip summary"], "Water bowser": ["Checklist", "Trip summary"], "Bakkies": ["Checklist"] };
 const docsOf = (m, d, sh) => R("doc").concat(R("mdoc")).filter(x => x.machine === m && (!d || (x.date === d && x.shift === sh)));   // mdoc: drill rig documents from the Metres section
 function shiftsSoFar(m0) { const L = [], c = curShift(), end = m0 === today().slice(0, 7) ? today() : monthEnd(m0);
@@ -1428,6 +1474,7 @@ document.addEventListener("click", async ev => {
     if (val && prev) { const pv = prevHour(d, +h), pr = recs.find(r => r.id === `hr_${pv[0]}_${mc}` && !r.deleted);   // the hour before shows the previous status when it was left empty
       if (hStart(pv[0], pv[1]) >= shiftWin(d, +h < 18 ? "Day" : "Night")[0] && !(pr?.cells?.[pv[1]]) && cellVal(pv[0], mc, pv[1]) !== prev) await setCell(pv[0], mc, pv[1], prev, { prev }); }
     await joinRuns(); if (!val) toast(`${mc} ${hLabel(+h)} cleared.`); render();
+    if ((val === "BD" || val === "PM") && !(cur === "BD" || cur === "PM")) { const e0 = downEvs(mc).filter(x => x.type === val && !x.deleted && toMs(x.start) < a + 36e5 && evEnd(x) > a).sort((x, y) => toMs(y.start) - toMs(x.start))[0]; if (e0) mntNudge(e0.id); }
     if ((val === "BD" || val === "PM") && a + 36e5 <= Date.now()) {   // an hour already gone: ask the real times straight away so the box shows green / blue or red / green
       const e = downEvs(mc).find(x => x.type === val && x.grid && !x.deleted && toMs(x.start) < a + 36e5 && evEnd(x) > a);
       if (e) { openEv(evForm(e), `${mc} · ${TYPES[val].toLowerCase()} – type the times`); toast("Type when it stopped and when it was back. The rest of the hour stays green."); } }
@@ -1491,6 +1538,10 @@ async function clickH(ev) {
     if (ms > Date.now()) { toast("Pick a time that has passed."); return; } await setSite(m, k === "off", ms); const gi = fleet().findIndex(([, L]) => L.includes(m)); openEv(siteForm(gi), "On site / not on site"); render(); toast(`${m} ${k === "off" ? "marked not on site" : "back on site"}.`); return; }
   if (b.dataset.rmmg) { openEv(machForm(+b.dataset.rmmg, "rm"), "Remove a machine"); return; }
   if (b.dataset.mtdxl !== undefined) { toast("Making the report…"); try { await exportBdReport(today().slice(0, 8) + "01", today()); } catch (e) { console.warn(e); toast("The report couldn't be made."); } return; }
+  if (b.dataset.mntup) { document.getElementById("mntBar")?.remove(); const [id, t, d, sh] = b.dataset.mntup.split("|"); openEv(mntForm(id, t, d, sh), "Job card, quotation and requisition"); return; }
+  if (b.dataset.mntclose !== undefined) { document.getElementById("mntBar")?.remove(); return; }
+  if (b.dataset.mntzip !== undefined) { b.disabled = true; try { await mntZip(mntDay || today(), b.dataset.mntzip); } catch (e) { console.warn(e); toast("The download couldn't be made."); } b.disabled = false; return; }
+  if (b.dataset.mntday) { mntDay = addDays(mntDay || today(), +b.dataset.mntday); if (mntDay > today()) mntDay = today(); render(); return; }
   if (b.dataset.svclog) { openEv(svcForm(b.dataset.svclog), `${b.dataset.svclog} · last service`); return; }
   if (b.dataset.precap !== undefined) { openEv(preForm(b.dataset.precap, b.dataset.preid), "Pre-use checklist"); return; }
   if (b.dataset.preday) { const { d: d0, sh: s0 } = shiftNow(); let d = preDay || d0, sh = preSh || s0; if (+b.dataset.preday < 0) { if (sh === "Night") sh = "Day"; else { sh = "Night"; d = addDays(d, -1); } } else { if (sh === "Day") sh = "Night"; else { sh = "Day"; d = addDays(d, 1); } } preDay = d; preSh = sh; render(); return; }
@@ -1538,6 +1589,7 @@ async function clickH(ev) {
 async function submitH(ev) {
   const f = ev.target; ev.preventDefault();
   if (f.id === "fPre") { await savePre(f); return; }
+  if (f.id === "fMnt") { await saveMnt(f); return; }
   if (f.id === "fSvc") { const mc = f.dataset.mc, r = String(f.elements.r.value).trim().replace(/\s/g, "").replace(",", "."), d = f.elements.d.value, n = f.elements.n.value.trim(); if (!/^\d+(\.\d+)?$/.test(r)) { toast("Type the hour meter reading as a number."); return; }
     await put({ id: "svc_" + uid(), kind: "svc", ym: d.slice(0, 7), date: d, machine: mc, reading: +r, note: n }, `${mc} service logged at ${mtxt(+r)} h (${fmt(d).slice(0, 5)})${n ? " · " + n : ""}`); closeEv(); render(); toast(`Service saved. Next service: ${pmText(mc)} left.`); return; }
   if (f.id === "fAdd") { const name = f.elements.name.value.trim().replace(/\s+/g, " "), p = f.elements.pin.value, p2 = f.elements.pin2.value;
@@ -1599,12 +1651,13 @@ async function submitH(ev) {
     await put(rec, `${old ? "Changed" : "Logged"} ${rec.machine}: ${TYPES[rec.type]} ${hhmm(s)}${e ? "–" + hhmm(e) : " (still going)"}${rec.reason ? " · " + rec.reason : ""}${rec.action ? " · action: " + rec.action : ""}${rec.owner ? " · " + rec.owner : ""}${rec.eta ? " · ETA " + fmt(rec.eta) : ""}`);
     if (old && old.type !== rec.type) await retypeBoxes(rec.machine, toMs(rec.start), rec.end ? toMs(rec.end) : 0, old.type, rec.type);   // the hour boxes follow the new kind
     const hc = f.elements.hourcell?.value; if (hc) { const [hd, hm2, hh] = hc.split("|"); await clearRest(hd, hm2, +hh); }   // the whole-hour entry in that hour is replaced by the typed times
-    closeEv(); render(); toast(`Saved: ${rec.machine} ${TYPES[rec.type].toLowerCase()} from ${hhmm(s)}${e ? " to " + hhmm(e) : ""}.`);
+    closeEv(); render(); toast(`Saved: ${rec.machine} ${TYPES[rec.type].toLowerCase()} from ${hhmm(s)}${e ? " to " + hhmm(e) : ""}.`); if (!old && (rec.type === "BD" || rec.type === "PM")) mntNudge(rec.id);
     if (!old && rec.type === "BD" && mailList().length) openEv(mailForm(recs.find(x => x.id === rec.id) || rec), "Email this breakdown"); return; }
   if (f.id === "fSync") { if (!navigator.onLine) { toast("Signing in needs signal."); return; } try { await fire(); await fb.signInWithEmailAndPassword(fb.auth, toLogin(f.elements.e.value), f.elements.p.value); toast("Signed in. The control room now sends to the TKR app by itself."); } catch { toast("Email or password is wrong."); } return; }
 }
 async function changeH(ev) {
   if (ev.target.closest?.("#fDoc") && ["t", "m"].includes(ev.target.name)) { const f = ev.target.form; if (f.elements.t.value === "Checklist" && isRB(f.elements.m.value)) { openEv(preForm(f.elements.m.value, null, f.elements.d.value, f.elements.sh.value), "Pre-use checklist"); return; } }
+  if (ev.target.id === "mntPick") { mntDay = ev.target.value || today(); render(); return; }
   if (ev.target.id === "fMach") { fMach = ev.target.value; render(); return; }
   if (ev.target.id === "fType") { fType = ev.target.value; render(); return; }
   if (!me) return;
