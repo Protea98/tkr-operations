@@ -61,7 +61,8 @@ const fileSet = async (id, data) => { const d = await idb(); return new Promise(
 let cvMemo = new Map(), idx = null, kindIdx = null, lkMemo = new Map(); const bump = () => { cvMemo.clear(); idx = null; kindIdx = null; lkMemo.clear(); };
 /* quick look-ups (rebuilt after every change) so the dashboard doesn't search every record again for each box */
 const byId = id => { if (!idx) { idx = new Map(); for (const r of recs) if (!r.deleted) idx.set(r.id, r); } return idx.get(id); };
-let recs = [], me = null, tab = "now", date = today(), month = today().slice(0, 7), pinFor = null, addingMe = false;
+const MNT = window.TKR_SECTION === "maintenance";   // the Maintenance section: its own page, same data as the Control Room
+let recs = [], me = null, tab = MNT ? (location.hash === "#pre" ? "pre" : "mnt") : "now", date = today(), month = today().slice(0, 7), pinFor = null, addingMe = false;
 const R = k => { if (!kindIdx) { kindIdx = new Map(); for (const r of recs) if (!r.deleted) { if (!kindIdx.has(r.kind)) kindIdx.set(r.kind, []); kindIdx.get(r.kind).push(r); } } return (kindIdx.get(k) || []).slice(); };
 /* Locking: every filled box remembers the shift (session) that filled it. Once that controller logs out,
    the box is grey and locked for everyone else; empty boxes stay open. Locked boxes change only with admin approval. */
@@ -102,7 +103,7 @@ async function discardChanges() {
   const n = undo.filter(u => recs.find(x => x.id === u.id)?.kind !== "log").length; await clearUndo(); syncSoon(); return n;
 }
 async function put(r, log, asBy) {
-  if (me && !me.admin && r.kind !== "duty" && r.kind !== "log") { const x = dutyLive(); if (x && x.sid !== me.sid) { dutyCheck(); throw new Error("not on duty"); } }   // only the person on duty can change anything
+  if (me && !me.admin && r.kind !== "duty" && r.kind !== "log" && !["doc", "pre", "svc"].includes(r.kind)) { const x = dutyLive(); if (x && x.sid !== me.sid) { dutyCheck(); throw new Error("not on duty"); } }   // only the person on duty can change anything
   const old = recs.find(x => x.id === r.id); journal(r.id, old);
   if (r.kind === "hr") { const a0 = old?.cells || {}, b0 = r.cells || {}, ct = { ...(old?.ct || {}), ...(r.ct || {}) }, t0 = Date.now();   // when each hour box last changed (also when it was emptied), so PCs merge box by box
     for (const k of new Set([...Object.keys(a0), ...Object.keys(b0)])) if ((a0[k] || "") !== (b0[k] || "")) ct[k] = t0; r = { ...r, ct }; }
@@ -239,14 +240,16 @@ function gateView() {
 }
 
 /* ---------- views ---------- */
-const TABS = [["now", "Live board and workbook", "deploy"], ["files", "Documents", "docs"], ["pre", "Checklists", "docs"], ["mnt", "Maintenance", "settings"], ["inv", "Invoicing", "money"], ["export", "Export & sync", "import"], ["settings", "Settings", "settings"]];
+const TABS = [["now", "Live board and workbook", "deploy"], ["files", "Documents", "docs"], ["inv", "Invoicing", "money"], ["export", "Export & sync", "import"], ["settings", "Settings", "settings"]];
 const pendingReqs = () => R("req").filter(q => q.status === "pending").length + R("user").filter(u => u.status === "pending").length;
-const tabs = () => { const n = pendingReqs(); return [TABS[0], TABS[1], ["req", `Change requests${n ? ` (${n})` : ""}`, "missing"], ...TABS.slice(2)]; };
+const MNT_TABS = [["mnt", "Breakdowns and job cards", "settings"], ["pre", "Pre-use checklists", "docs"]];
+const tabs = () => { if (MNT) return MNT_TABS; const n = pendingReqs(); return [TABS[0], TABS[1], ["req", `Change requests${n ? ` (${n})` : ""}`, "missing"], ...TABS.slice(2)]; };
 function render() {
+  if (MNT && !["mnt", "pre"].includes(tab)) tab = "mnt";
   $("who").innerHTML = me ? `${esc(me.name)} · <button class="sm ghost" data-logout="swap" style="min-height:36px;padding:2px 12px">Change controller</button><button class="sm danger" data-logout style="min-height:36px;padding:2px 12px">Log out</button>` : "";
   if (!me && viewer) { $("who").innerHTML = `Viewing only · <button class="sm" data-unview="1" style="min-height:36px;padding:2px 12px">Controller sign-in</button>`;
-    const ws = app.querySelector(".xlsheet")?.scrollTop, wl = app.querySelector(".xlsheet")?.scrollLeft; if (tab !== "files") tab = "now";
-    app.innerHTML = tabBar([["now", "Dashboard", "deploy"], ["files", "Documents", "docs"]], tab) + `<div class="ro">${tab === "files" ? filesView() : nowView()}</div>`; afterRender(app);
+    const ws = app.querySelector(".xlsheet")?.scrollTop, wl = app.querySelector(".xlsheet")?.scrollLeft; if (MNT) { if (!["mnt", "pre"].includes(tab)) tab = "mnt"; } else if (tab !== "files") tab = "now";
+    app.innerHTML = MNT ? tabBar(MNT_TABS, tab) + `<div class="ro">${tab === "pre" ? preView() : maintView()}</div>` : tabBar([["now", "Dashboard", "deploy"], ["files", "Documents", "docs"]], tab) + `<div class="ro">${tab === "files" ? filesView() : nowView()}</div>`; afterRender(app);
     const w = app.querySelector(".xlsheet"); if (w && ws != null) { w.scrollTop = ws; w.scrollLeft = wl; } return; }
   if (!me) { app.innerHTML = `<div class="card viewcard"><b>Just want to see the machines?</b><span class="muted">Anyone can view the live board and the hours. Only controllers can change them.</span><button class="primary" data-view="1">View the dashboard</button></div>` + gateView(); return; }
   let body = "";
@@ -312,7 +315,7 @@ function nowView() {
     + `<h2 class="secth">Rompad and Pit project</h2>` + areaCards()
     + hourBoard()
     + `<div class="openers">${sheet("mtd", `Month-to-date availability · ${monthName(today().slice(0, 7))}`, mtdCard(), { icon: icon("hours"), sub: "every machine from the 1st to now, times in h:mm" })}${(() => { const { d, sh } = shiftNow(), L = preOf(d, sh), due = preDue(d, sh), got = new Set(L.map(p => p.machine)), miss = due.filter(m => !got.has(m)), A = preOpen().filter(f => f.it[2] === "A" && f.v === "NG");
-      return sheet("prechk", `Pre-use checklists · ${sh} shift`, `<p>Received <b>${due.filter(m => got.has(m)).length} of ${due.length}</b>${miss.length ? ` · missing: ${miss.map(esc).join(", ")}` : ""}</p>${A.length ? `<p style="color:#e0705f"><b>A-hazard NO GO – must not be used:</b> ${A.map(f => `${esc(f.p.machine)} (${esc(f.it[1])})`).join(", ")}</p>` : ""}<button data-tab="pre">Open checklists</button>`, { icon: icon("docs"), count: miss.length + A.length, cls: miss.length || A.length ? "alert" : "good", sub: "rockbreaker pre-use checklists this shift" }); })()}${sheet("svc", "Hours until next service", svcCard(), { icon: icon("hours"), sub: "a hyphen where the next service reading is not set yet" })}</div>`
+      return sheet("prechk", `Pre-use checklists · ${sh} shift`, `<p>Received <b>${due.filter(m => got.has(m)).length} of ${due.length}</b>${miss.length ? ` · missing: ${miss.map(esc).join(", ")}` : ""}</p>${A.length ? `<p style="color:#e0705f"><b>A-hazard NO GO – must not be used:</b> ${A.map(f => `${esc(f.p.machine)} (${esc(f.it[1])})`).join(", ")}</p>` : ""}<a class="btn" href="../maintenance/#pre">Open pre-use checklists (Maintenance)</a>`, { icon: icon("docs"), count: miss.length + A.length, cls: miss.length || A.length ? "alert" : "good", sub: "rockbreaker pre-use checklists this shift" }); })()}${sheet("svc", "Hours until next service", svcCard(), { icon: icon("hours"), sub: "a hyphen where the next service reading is not set yet" })}</div>`
     + `<div class="openers">${sheet("open", `Still down now (${open.length})`, open.map(evLine).join("") || '<p class="muted">Nothing open with a logged time.</p>', { icon: "!", count: open.length, cls: open.length ? "alert" : "good", sub: "breakdowns, standby and maintenance not closed yet" })}
       ${sheet("todayev", "This shift's breakdowns and maintenance", `<div class="res">${SE.map(seLine).join("") || '<p class="muted">Nothing on this shift yet.</p>'}</div>`, { icon: icon("bd"), count: SE.length, sub: `${ssh.toLowerCase()} shift from ${ssh === "Day" ? "06:00" : "18:00"}, from the sheet and the logged times` })}
       ${sheet("delays", `Delay summary · ${monthName(today().slice(0, 7))}`, delaySummary(today().slice(0, 7)), { icon: icon("bd"), sub: "lost time per machine and per cause this month" })}
@@ -720,7 +723,7 @@ function preView() { const { d: d0, sh: s0 } = shiftNow(); const d = preDay || d
   const top = {}; for (const p of R("pre").filter(p => p.ym === today().slice(0, 7))) for (const f of preFinds(p)) top[f.k] = (top[f.k] || 0) + 1;
   const ageTxt = f => { const t = preWhen(f.p), h = (now - t) / 36e5; if (f.it[2] === "B") { const left = 48 - h; return left >= 0 ? `due in ${hm(left)} h` : `<b style="color:#c0392b">overdue by ${hm(-left)} h</b>`; } return h >= 48 ? `open ${Math.floor(h / 24)} days` : `open ${hm(h)} h`; };
   const cls = f => f.it[2] === "A" && f.v === "NG" ? "bad" : f.it[2] === "A" ? "warn" : f.it[2] === "B" ? "warn" : "";
-  return pageHead("Control room", "Pre-use checklists", "Mobile rock breaker pre-use checklist: capture it from the photo, the app works out the findings", `<button class="primary" data-precap="">+ Capture checklist</button> <button data-prexl="">Download Excel</button> <button data-prewa="">Copy WhatsApp summary</button>`)
+  return pageHead("Maintenance", "Pre-use checklists", "Mobile rock breaker pre-use checklist: capture it from the photo, the app works out the findings", `<button class="primary" data-precap="">+ Capture checklist</button> <button data-prexl="">Download Excel</button> <button data-prewa="">Copy WhatsApp summary</button>`)
     + `<div class="dnav"><button data-preday="-1" aria-label="Shift before">‹</button><b style="padding:0 10px">${fmt(d)} · ${sh} shift</b><button data-preday="1" aria-label="Next shift" ${d === d0 && sh === s0 ? "disabled" : ""}>›</button></div>`
     + `<div class="tiles ctiles"><div class="tile ${miss.length ? "alert" : "good"}"><div class="l">Received this shift</div><div class="n">${due.filter(m => got.has(m)).length}<small>/${due.length}</small></div><div class="s">${miss.length ? "missing: " + miss.map(esc).join(", ") : "all in"}</div></div>
       <div class="tile ${OP.some(f => f.it[2] === "A" && f.v === "NG") ? "alert" : ""}"><div class="l">A-hazard NO GO open</div><div class="n">${OP.filter(f => f.it[2] === "A" && f.v === "NG").length}</div><div class="s">machine must not be used</div></div>
@@ -796,7 +799,7 @@ function svcForm(mc) { const L = lastSvc(mc), { d, sh } = shiftNow(), m = meterO
     <h4 style="margin-top:16px">Services logged</h4>${H.length ? `<table class="mini"><tbody>${H.map(x => `<tr><td>${fmt(x.date)}</td><td>${mtxt(x.reading)}</td><td>${esc(x.note || "")}</td><td>${esc(x.by || "")}</td></tr>`).join("")}</tbody></table>` : '<p class="muted">-</p>'}`; }
 /* ---------- Maintenance: every breakdown and planned maintenance with its job card, quotation and requisition ---------- */
 const MDOCS = ["Job card", "Quotation", "Requisition"];
-let mntDay = null;
+let mntDay = null, mntFrom = null, mntTo = null;
 async function storeDocs(files, { m, t, d, sh, ev }) { let n = 0;
   for (const file of files) { try { const photo = /^image\/(jpeg|png|webp|bmp)$/.test(file.type); if (!photo && file.size > 15 * 1024 * 1024) { toast(file.name + " is bigger than 15 MB."); continue; }
       let data = photo ? await shrinkImg(file).catch(() => "") : ""; const mime = data ? "image/jpeg" : (file.type || mimeOf(file.name)); if (!data) data = await dataUrlOf(new Blob([file], { type: mime }));
@@ -813,7 +816,9 @@ const mntDocs = (e, d) => R("doc").filter(x => MDOCS.includes(x.type) && (x.ev =
 const mntDocsDay = d => R("doc").filter(x => MDOCS.includes(x.type) && (x.date === d || mntEvents(d).some(e => x.ev === e.id)));
 function maintView() { const d = mntDay || today(), E = mntEvents(d), all = mntDocsDay(d), jc = all.filter(x => x.type === "Job card");
   const miss = E.filter(e => !mntDocs(e, d).some(x => x.type === "Job card"));
-  return pageHead("Control room", "Maintenance", "Every breakdown and planned maintenance with its job card, quotation and requisition", `<button class="primary" data-mntzip="Job card">Download job cards for ${fmt(d).slice(0, 5)} (${jc.length})</button> <button data-mntzip="">Download all maintenance documents (${all.length})</button>`)
+  return pageHead("Maintenance", "Breakdowns and job cards", "Every breakdown and planned maintenance logged in the Control Room, with its job card, quotation and requisition", "")
+    + `<section class="card"><h3 style="margin-top:0">Download as one PDF</h3><div class="row" style="gap:10px;flex-wrap:wrap;align-items:end"><label>From <input type="date" id="mntFrom" value="${mntFrom || d}" max="${today()}"></label><label>To <input type="date" id="mntTo" value="${mntTo || d}" max="${today()}"></label>
+      <button class="primary" data-mntpdf="Job card">Job cards (PDF)</button><button data-mntpdf="">Job cards, quotations and requisitions (PDF)</button></div><p class="muted" style="margin:6px 0 0">One PDF with a TKR cover page listing every stop and document, then the documents in date order. Word and Excel files are listed on the cover (they can't go inside a PDF).</p></section>`
     + `<div class="dnav"><button data-mntday="-1" aria-label="Day before">‹</button><input type="date" id="mntPick" value="${d}" max="${today()}"><button data-mntday="1" aria-label="Next day" ${d >= today() ? "disabled" : ""}>›</button></div>`
     + `<div class="tiles ctiles"><div class="tile ${E.filter(e => e.type === "BD").length ? "alert" : ""}"><div class="l">Breakdowns</div><div class="n">${E.filter(e => e.type === "BD").length}</div><div class="s">${fmt(d)}</div></div>
       <div class="tile"><div class="l">Planned maintenance</div><div class="n">${E.filter(e => e.type === "PM").length}</div><div class="s">${fmt(d)}</div></div>
@@ -840,6 +845,38 @@ async function mntZip(d, only) { const L = mntDocsDay(d).filter(x => !only || x.
 function mntNudge(evId) { const e = recs.find(x => x.id === evId); if (!e || !me) return; document.getElementById("mntBar")?.remove(); const a = toMs(e.start), d = dayOfMs(a), sh = shOf(a);
   const b = document.createElement("div"); b.id = "mntBar"; b.className = "mntbar"; b.innerHTML = `<span>${esc(e.machine)} ${e.type === "BD" ? "breakdown" : "maintenance"} logged. Upload the job card, quotation or requisition?</span><button class="sm primary" data-mntup="${esc(e.id)}|Job card|${d}|${sh}">Upload</button><button class="sm ghost" data-mntclose="">Later</button>`;
   b.addEventListener("click", clickH); document.body.appendChild(b); clearTimeout(mntNudge.t); mntNudge.t = setTimeout(() => b.remove(), 15000); }
+async function mntPdf(from, to, only) {
+  const E = [], seen = new Set(); for (let d = from; d <= to; d = addDays(d, 1)) for (const e of mntEvents(d)) if (!seen.has(e.id)) { seen.add(e.id); E.push(e); }
+  const L = R("doc").filter(x => (only ? x.type === only : MDOCS.includes(x.type)) && ((x.date >= from && x.date <= to) || (x.ev && seen.has(x.ev)))).sort((a, b) => (a.date + (a.shift === "Night" ? "2" : "1")).localeCompare(b.date + (b.shift === "Night" ? "2" : "1")) || a.machine.localeCompare(b.machine));
+  const what = only ? only.toLowerCase() + "s" : "maintenance documents"; if (!L.length) { toast(`No ${what} for ${fmt(from)}${to !== from ? " to " + fmt(to) : ""}.`); return; }
+  await new Promise((res, rej) => { if (window.PDFLib) return res(); const sc = document.createElement("script"); sc.src = "../lib/pdf-lib.min.js"; sc.onload = res; sc.onerror = rej; document.head.appendChild(sc); });
+  const { PDFDocument, StandardFonts, rgb } = window.PDFLib, pdf = await PDFDocument.create(), hv = await pdf.embedFont(StandardFonts.Helvetica), hb = await pdf.embedFont(StandardFonts.HelveticaBold);
+  pdf.setTitle(`TKR ${only ? only + "s" : "Maintenance documents"} ${from}${to !== from ? " to " + to : ""}`); pdf.setAuthor("TKR Operations");
+  let logo = null; try { logo = await pdf.embedPng(await (await fetch("../icons/logo-96.png")).arrayBuffer()); } catch {}
+  const A4 = [595.28, 841.89], GOLD = rgb(0.83, 0.63, 0.16), INK = rgb(0.07, 0.07, 0.07), GREY = rgb(0.4, 0.4, 0.4), stopOf = x => E.find(e => e.id === x.ev) || null;
+  const cut = (t, f, sz, w) => { t = String(t || ""); while (t && f.widthOfTextAtSize(t, sz) > w) t = t.slice(0, -2); return t; };
+  const data = [], skipped = [], notPdf = []; for (const x of L) { const v = await docData(x); if (!v) skipped.push(x); else if (/^data:image\/(jpeg|png)/.test(v) || /^data:application\/pdf/.test(v)) data.push([x, v]); else notPdf.push(x); }
+  // cover: TKR header, the period, every stop and every document
+  let pg = pdf.addPage(A4), y = 800; const head = (p, t2) => { p.drawRectangle({ x: 0, y: 770, width: A4[0], height: 72, color: INK }); p.drawRectangle({ x: 0, y: 766, width: A4[0], height: 4, color: GOLD }); if (logo) p.drawImage(logo, { x: 28, y: 780, width: 50, height: 50 });
+    p.drawText("TKR OPERATIONS · THARISA MINE", { x: 90, y: 815, size: 9, font: hb, color: GOLD }); p.drawText(t2, { x: 90, y: 795, size: 15, font: hb, color: rgb(1, 1, 1) }); };
+  head(pg, `${only ? only + "s" : "Job cards, quotations and requisitions"} – ${fmt(from)}${to !== from ? " to " + fmt(to) : ""}`); y = 740;
+  const line = (t, f = hv, sz = 9, c = INK, x0 = 36) => { if (y < 50) { pg = pdf.addPage(A4); head(pg, "Contents (continued)"); y = 740; } pg.drawText(cut(t, f, sz, A4[0] - x0 - 30), { x: x0, y, size: sz, font: f, color: c }); y -= sz + 5; };
+  line(`${E.filter(e => e.type === "BD").length} breakdowns and ${E.filter(e => e.type === "PM").length} planned maintenance stops · ${L.length} documents · downloaded ${fmt(today())} ${tOf(Date.now())}`, hv, 9, GREY); y -= 6;
+  line("Documents in this PDF", hb, 11); let n = 1; const idx = new Map();
+  for (const [x] of data) { const e = stopOf(x); idx.set(x.id, n); line(`${n++}. ${fmt(x.date).slice(0, 5)} ${x.shift} · ${x.machine} · ${x.type}${e ? ` · ${e.type === "BD" ? "breakdown" : "maintenance"} from ${hhmm(e.start)}${e.reason ? " – " + e.reason : ""}` : ""}`); }
+  if (notPdf.length) { y -= 6; line("Not inside this PDF (Word or Excel – download from Documents)", hb, 10); for (const x of notPdf) line(`${fmt(x.date).slice(0, 5)} ${x.machine} · ${x.type} · ${x.name}`); }
+  if (skipped.length) { y -= 6; line("On another PC, not downloaded yet (open the app there with signal)", hb, 10, rgb(0.6, 0.15, 0.13)); for (const x of skipped) line(`${fmt(x.date).slice(0, 5)} ${x.machine} · ${x.type} · ${x.name}`); }
+  const noJc = E.filter(e => !R("doc").some(x => x.type === "Job card" && (x.ev === e.id || (!x.ev && x.machine === e.machine && x.date === dayOfMs(toMs(e.start))))));
+  if (noJc.length) { y -= 6; line("Stops with no job card yet", hb, 10, rgb(0.6, 0.15, 0.13)); for (const e of noJc) line(`${fmt(e.start.slice(0, 10)).slice(0, 5)} ${hhmm(e.start)} · ${e.machine} · ${e.type === "BD" ? "breakdown" : "maintenance"}${e.reason ? " – " + e.reason : ""}`); }
+  // the documents, in order: photos one per page with a heading line, PDFs page by page
+  for (const [x, v] of data) { const e = stopOf(x), cap = `${idx.get(x.id)}. ${fmt(x.date)} ${x.shift} · ${x.machine} · ${x.type}${e ? ` · ${e.type === "BD" ? "breakdown" : "maintenance"} ${hhmm(e.start)}${e.reason ? " – " + e.reason : ""}` : ""}`;
+    const bytes = Uint8Array.from(atob(v.split(",")[1]), ch => ch.charCodeAt(0));
+    if (/^data:application\/pdf/.test(v)) { try { const src = await PDFDocument.load(bytes, { ignoreEncryption: true }); for (const p of await pdf.copyPages(src, src.getPageIndices())) pdf.addPage(p); } catch (er) { console.warn(er); } continue; }
+    const img = /^data:image\/png/.test(v) ? await pdf.embedPng(bytes) : await pdf.embedJpg(bytes), land = img.width > img.height, sz = land ? [A4[1], A4[0]] : A4, p = pdf.addPage(sz);
+    p.drawText(cut(cap, hb, 10, sz[0] - 60), { x: 30, y: sz[1] - 26, size: 10, font: hb, color: INK }); p.drawRectangle({ x: 30, y: sz[1] - 34, width: sz[0] - 60, height: 1.5, color: GOLD });
+    const W = sz[0] - 60, H = sz[1] - 80, k = Math.min(W / img.width, H / img.height); p.drawImage(img, { x: (sz[0] - img.width * k) / 2, y: 30 + (H - img.height * k) / 2, width: img.width * k, height: img.height * k }); }
+  const blob = new Blob([await pdf.save()], { type: "application/pdf" }), { deliver } = await import("../lib/deliver.js");
+  deliver(blob, `TKR_${only ? only.replace(/\s+/g, "_") + "s" : "Maintenance_documents"}_${from}${to !== from ? "_to_" + to : ""}.pdf`); toast(`PDF ready: ${data.length} document${data.length === 1 ? "" : "s"}.`); }
 function firstDay(mc) { const k = "first|" + mc; if (lkMemo.has(k)) return lkMemo.get(k); let f = today();
   for (const r of recs) if (r.kind === "hr" && !r.deleted && r.machine === mc && r.date < f && (Object.values(r.cells || {}).some(v => v && v !== "-") || Object.values(r.meter || {}).some(m => meterHrs(m) != null))) f = r.date;
   for (const e of downEvs(mc)) { const d0 = String(e.start).slice(0, 10); if (d0 < f) f = d0; } lkMemo.set(k, f); return f; }
@@ -1178,7 +1215,8 @@ let admApp = null;
 let devId = ""; try { devId = localStorage.getItem("tkr-ctl-dev") || ""; if (!devId) { devId = "d_" + uid(); localStorage.setItem("tkr-ctl-dev", devId); } } catch { devId = "d_" + uid(); }
 const dutyRec = () => recs.find(r => r.id === "duty" && !r.deleted);
 const dutyLive = () => { const x = dutyRec(); return x && x.sid && !x.admin && Date.now() - (x.at || 0) < 15 * 6e4 ? x : null; };   // an admin never holds the duty: controllers can always sign in
-async function setDuty(on) { if (me?.admin) return; const old = dutyRec(); if (on) await put({ ...(old || {}), id: "duty", kind: "duty", ym: "setup", user: me.id, name: me.name, sid: me.sid, dev: devId, admin: !!me.admin, at: Date.now(), deleted: false });
+async function setDuty(on) { if (me?.admin || MNT) return;   // signing in on the Maintenance page never takes the duty from the Control Room PC
+  const old = dutyRec(); if (on) await put({ ...(old || {}), id: "duty", kind: "duty", ym: "setup", user: me.id, name: me.name, sid: me.sid, dev: devId, admin: !!me.admin, at: Date.now(), deleted: false });
   else if (old && old.sid === me?.sid) await put({ ...old, sid: "", at: 0 }); syncSoon(); }
 function dutyCheck() { const x = dutyLive(); if (!me || !x || x.sid === me.sid) return;
   if (me.admin) return;   // admins sign in beside the controller on duty and are never signed out by them
@@ -1540,6 +1578,7 @@ async function clickH(ev) {
   if (b.dataset.mtdxl !== undefined) { toast("Making the report…"); try { await exportBdReport(today().slice(0, 8) + "01", today()); } catch (e) { console.warn(e); toast("The report couldn't be made."); } return; }
   if (b.dataset.mntup) { document.getElementById("mntBar")?.remove(); const [id, t, d, sh] = b.dataset.mntup.split("|"); openEv(mntForm(id, t, d, sh), "Job card, quotation and requisition"); return; }
   if (b.dataset.mntclose !== undefined) { document.getElementById("mntBar")?.remove(); return; }
+  if (b.dataset.mntpdf !== undefined) { const f = $("mntFrom")?.value || today(), t = $("mntTo")?.value || f; if (t < f) { toast("The To date must be on or after the From date."); return; } mntFrom = f; mntTo = t; b.disabled = true; toast("Making the PDF…"); try { await mntPdf(f, t, b.dataset.mntpdf); } catch (e) { console.warn(e); toast("The PDF couldn't be made."); } b.disabled = false; return; }
   if (b.dataset.mntzip !== undefined) { b.disabled = true; try { await mntZip(mntDay || today(), b.dataset.mntzip); } catch (e) { console.warn(e); toast("The download couldn't be made."); } b.disabled = false; return; }
   if (b.dataset.mntday) { mntDay = addDays(mntDay || today(), +b.dataset.mntday); if (mntDay > today()) mntDay = today(); render(); return; }
   if (b.dataset.svclog) { openEv(svcForm(b.dataset.svclog), `${b.dataset.svclog} · last service`); return; }
@@ -1657,7 +1696,8 @@ async function submitH(ev) {
 }
 async function changeH(ev) {
   if (ev.target.closest?.("#fDoc") && ["t", "m"].includes(ev.target.name)) { const f = ev.target.form; if (f.elements.t.value === "Checklist" && isRB(f.elements.m.value)) { openEv(preForm(f.elements.m.value, null, f.elements.d.value, f.elements.sh.value), "Pre-use checklist"); return; } }
-  if (ev.target.id === "mntPick") { mntDay = ev.target.value || today(); render(); return; }
+  if (ev.target.id === "mntPick") { mntDay = ev.target.value || today(); mntFrom = mntTo = null; render(); return; }
+  if (ev.target.id === "mntFrom" || ev.target.id === "mntTo") { mntFrom = $("mntFrom").value; mntTo = $("mntTo").value; return; }
   if (ev.target.id === "fMach") { fMach = ev.target.value; render(); return; }
   if (ev.target.id === "fType") { fType = ev.target.value; render(); return; }
   if (!me) return;
