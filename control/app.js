@@ -1047,12 +1047,13 @@ function shiftMessage(d, sh, short = false) {   // simple: every machine, its st
 const PIC_VIEWS = [["drill", "Drilling"], ["cem", "Cementation bus"], ["pit", "Pit pecker"], ["rest", "Rompad and support fleet"]];   // Eddie's categories, each its own picture
 const cemBuses = () => { const v = byId("views")?.cem; return v && v.length ? v : ["TKR026"]; };   // TKR026 is the Cementation bus (Muneer, 26/11)
 function viewFleet(v) { const F = fleet(), { d, sh } = shiftNow();
+  if (v === "one") return [...F.filter(([g]) => /drill/i.test(g)).map(([, L]) => ["Drilling", L]), ...viewFleet("cem"), ...viewFleet("pit"), ...viewFleet("rest")].filter(([, L]) => L.length);   // one picture, in Eddie's categories
   if (v === "drill") return F.filter(([g]) => /drill/i.test(g));
   if (v === "pit") return [["Pit pecker", F.flatMap(([g, L]) => /rock/i.test(g) ? L : []).filter(mc => areaOf(d, mc, sh) === "Pit project")]];
   if (v === "cem") return [["Cementation bus", F.flatMap(([, L]) => L).filter(mc => cemBuses().includes(mc))]];
   if (v === "rest") return F.filter(([g]) => !/drill/i.test(g)).map(([g, L]) => [/rock/i.test(g) ? "Rompad peckers" : g, L.filter(mc => !cemBuses().includes(mc) && !(/rock/i.test(g) && areaOf(d, mc, sh) === "Pit project"))]).filter(([, L]) => L.length);
   return F; }
-async function statusPicture(view = "drill") {
+async function statusPicture(view = "one") {
   const F = viewFleet(view), ALL = F.flatMap(([, L]) => L).filter(m => !offNow(m)), { d: sd, sh: ssh } = shiftNow(), shT = fleetSum(ALL, m => shiftSum(m, sd, ssh));
   const st = m => { const x = stateNow(m); return x === "?" ? "OP" : x; }, cnt = k => ALL.filter(m => st(m) === k).length, now = Date.now();
   const COL = { OP: "#2f8a55", SB: "#c79a2e", BD: "#c0392b", PM: "#2f6fb5", NU: "#777", OFF: "#555" }, LBL = { OP: "Operational", SB: "Refuelling", BD: "Breakdown", PM: "Maintenance", NU: "Not in use", OFF: "Not on site" };
@@ -1109,7 +1110,7 @@ async function statusPicture(view = "drill") {
     if (g === groups[0]) { font(500, 12); x.fillStyle = T.muted; HRL.forEach((h, k) => { const l = pad(h % 24); x.fillText(l, HX + k * (HW + HG) + (HW - x.measureText(l).width) / 2, y + 22); }); }
     x.fillStyle = T.line; x.fillRect(P, y + 32, W - P * 2, 1); y += 36;
     g.L.forEach((m, i) => { const r = RI[i], Y = y, t = r.t; if (i) { x.fillStyle = "#222826"; x.fillRect(P, Y, W - P * 2, 1); }
-      font(700, 17); x.fillStyle = T.fg; x.fillText(m, P, Y + 26); font(400, 11.5); x.fillStyle = T.muted; x.fillText(fit("Available month to date " + pcOf(mtdSum(m)), NW - 8), P, Y + 42); if (svcFlag(m)) { font(700, 11.5); x.fillStyle = "#e0705f"; x.fillText(fit("Service due: " + pmText(m), NW - 8), P, Y + 57); font(400, 11.5); x.fillStyle = T.muted; } else x.fillText(fit("Next service: " + pmText(m), NW - 8), P, Y + 57);   // hours to next maintenance, a hyphen until it is set
+      font(700, 17); x.fillStyle = T.fg; x.fillText(m, P, Y + 26); font(400, 11.5); x.fillStyle = T.muted; x.fillText(fit("Month to date " + pcOf(mtdSum(m)), NW - 8), P, Y + 42); if (svcFlag(m)) { font(700, 11.5); x.fillStyle = "#e0705f"; x.fillText(fit("Service due: " + pmText(m), NW - 8), P, Y + 57); font(400, 11.5); x.fillStyle = T.muted; } else x.fillText(fit("Next service: " + pmText(m), NW - 8), P, Y + 57);   // hours to next maintenance, a hyphen until it is set
       font(500, 14); x.fillStyle = t === "OP" ? T.ok : t === "BD" ? T.bad : t === "PM" ? T.pm : t === "SB" ? T.sb : T.muted; x.fillText(fit(r.head, SW - 12), P + NW, Y + 24);
       let ly = Y + 24; font(400, 13); x.fillStyle = "#d8d3c4"; for (const ln of r.WL) { ly += 17; x.fillText(ln, P + NW, ly); }
       x.fillStyle = T.muted; for (const ln of r.PL) { ly += 17; x.fillText(ln, P + NW, ly); }
@@ -1119,9 +1120,9 @@ async function statusPicture(view = "drill") {
   x2.fillStyle = "#2d3431"; x2.fillRect(P, H2 - 54, W - P * 2, 1); x2.font = `400 14px "Inter","Segoe UI",Arial,sans-serif`; x2.fillStyle = "#a2a8a1"; x2.fillText("Live dashboard: protea98.github.io/tkr-operations/control", P, H2 - 20);
   const nm = `${me?.name || ""}`; if (nm) { const t2 = "Controller: " + nm; x2.fillText(t2, W - P - x2.measureText(t2).width, H2 - 20); }
   return c2; }
-async function showPicture(text, view = "drill") {
+async function showPicture(text, view = "one") {
   document.querySelector(".ccdone")?.remove(); const d = document.createElement("div"); d.className = "ccdone"; d.setAttribute("role", "dialog");
-  const tabsP = `<div class="row" style="gap:6px;margin:0 0 10px;flex-wrap:wrap">${PIC_VIEWS.map(([k, l]) => `<button class="sm${k === view ? " primary" : ""}" data-pv="${k}">${l}</button>`).join("")}</div>`;
+  const tabsP = "";   // one picture, sections in Eddie's categories
   if (view === "cem" && !cemBuses().length && false) { const B = fleet().flatMap(([g, L]) => /bus/i.test(g) ? L : []);   // which bus works for Cementation: picked once, kept for everyone
     d.innerHTML = `<div style="max-width:620px;width:100%"><div class="big">Cementation bus</div>${tabsP}<p>Tick the bus (or buses) that work for Cementation. This is saved for every PC.</p><div class="row" style="gap:10px;flex-wrap:wrap">${B.map(m => `<label style="display:flex;gap:6px;align-items:center"><input type="checkbox" value="${esc(m)}"> ${esc(m)}</label>`).join("")}</div>
       <div class="row" style="margin-top:12px;gap:6px"><button class="primary" data-pcem="1" style="flex:1">Save and show the picture</button><button class="ghost" data-p="x" style="flex:1">Close</button></div></div>`;
