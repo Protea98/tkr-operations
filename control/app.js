@@ -1043,8 +1043,16 @@ function shiftMessage(d, sh, short = false) {   // simple: every machine, its st
   return [`*TKR Control Room – ${sh} shift ${dow(d)} ${fmt(d)}*`, `Controller: ${ctl}`, `Status at ${tOf(cur ? now : Math.min(b, now))}`, "", ...head, "", "*Status per machine*", ...body, ...daily, "", "Live dashboard (no sign-in needed):", "https://protea98.github.io/tkr-operations/control/"].join("\n").trim();
 }
 /* the status picture: the dashboard summed up in one JPEG for WhatsApp (status right now) */
-async function statusPicture() {
-  const F = fleet(), ALL = F.flatMap(([, L]) => L).filter(m => !offNow(m)), { d: sd, sh: ssh } = shiftNow(), shT = fleetSum(ALL, m => shiftSum(m, sd, ssh));
+/* separate pictures (Eddie, 26/11): Drilling, the Cementation bus, the Pit pecker – or everything */
+const PIC_VIEWS = [["all", "All machines"], ["drill", "Drilling"], ["cem", "Cementation bus"], ["pit", "Pit pecker"]];
+const cemBuses = () => byId("views")?.cem || [];
+function viewFleet(v) { const F = fleet(), { d, sh } = shiftNow();
+  if (v === "drill") return F.filter(([g]) => /drill/i.test(g));
+  if (v === "pit") return [["Pit pecker", F.flatMap(([g, L]) => /rock/i.test(g) ? L : []).filter(mc => areaOf(d, mc, sh) === "Pit project")]];
+  if (v === "cem") return [["Cementation bus", F.flatMap(([, L]) => L).filter(mc => cemBuses().includes(mc))]];
+  return F; }
+async function statusPicture(view = "all") {
+  const F = viewFleet(view), ALL = F.flatMap(([, L]) => L).filter(m => !offNow(m)), { d: sd, sh: ssh } = shiftNow(), shT = fleetSum(ALL, m => shiftSum(m, sd, ssh));
   const st = m => { const x = stateNow(m); return x === "?" ? "OP" : x; }, cnt = k => ALL.filter(m => st(m) === k).length, now = Date.now();
   const COL = { OP: "#2f8a55", SB: "#c79a2e", BD: "#c0392b", PM: "#2f6fb5", NU: "#777", OFF: "#555" }, LBL = { OP: "Operational", SB: "Refuelling", BD: "Breakdown", PM: "Maintenance", NU: "Not in use", OFF: "Not on site" };
   const W = 1080, P = 28, NW = 132, SW = 330, HX = P + NW + SW, HRL = HRS(ssh), HG = 4, HW = (W - P - HX - HG * (HRL.length - 1)) / HRL.length, RH = 40;
@@ -1062,10 +1070,10 @@ async function statusPicture() {
   const box = (X, Y, w, h, r, f, s) => { x.beginPath(); x.roundRect(X + .5, Y + .5, w - 1, h - 1, r); if (f) { x.fillStyle = f; x.fill(); } if (s) { x.strokeStyle = s; x.lineWidth = 1; x.stroke(); } };
   x.fillStyle = T.bg; x.fillRect(0, 0, W, H);
   try { const img = new Image(); img.src = "../icons/logo-96.png"; await img.decode(); x.save(); x.beginPath(); x.arc(P + 26, 44, 26, 0, 7); x.clip(); x.drawImage(img, P, 18, 52, 52); x.restore(); } catch {}
-  font(700, 26); x.fillStyle = T.fg; x.fillText("Control Room – machine status", P + 66, 40);
+  font(700, 26); x.fillStyle = T.fg; x.fillText(view === "all" ? "Control Room – machine status" : `Control Room – ${PIC_VIEWS.find(q => q[0] === view)[1]}`, P + 66, 40);
   font(500, 15); x.fillStyle = T.muted; x.fillText(`TKR Operations · Tharisa · ${dow(sd)} ${fmt(sd)} · ${ssh} shift · ${tOf(now)}`, P + 66, 64);
   x.fillStyle = T.line; x.fillRect(P, 86, W - P * 2, 1);
-  const MA = ALL.map(m => mtdSum(m)).reduce((a2, q) => ({ avail: a2.avail + q.avail, down: a2.down + q.down }), { avail: 0, down: 0 }), tiles = [["AVAILABLE", pcOf(shT), "this shift", T.ok], ["MONTH TO DATE", pcOf(MA), "available since 01/" + today().slice(5, 7), T.ok], ["WORKING", `${cnt("OP") + cnt("SB")}/${ALL.length}`, cnt("SB") ? `${cnt("SB")} refuelling` : "machines", T.fg], ["BREAKDOWN", String(cnt("BD")), "now", cnt("BD") ? T.bad : T.fg], ["MAINTENANCE", String(cnt("PM")), "now", T.fg]];
+  const MA = ALL.map(m => mtdSum(m)).reduce((a2, q) => ({ avail: a2.avail + q.avail, down: a2.down + q.down }), { avail: 0, down: 0 }), tiles = [["AVAILABLE", pcOf(shT), "this shift", T.ok], ["MONTH TO DATE", pcOf(MA), "since 01/" + today().slice(5, 7), T.ok], ["WORKING", `${cnt("OP") + cnt("SB")}/${ALL.length}`, cnt("SB") ? `${cnt("SB")} refuelling` : "machines", T.fg], ["BREAKDOWN", String(cnt("BD")), "now", cnt("BD") ? T.bad : T.fg], ["MAINTENANCE", String(cnt("PM")), "now", T.fg]];
   const TW = (W - P * 2 - (tiles.length - 1) * 10) / tiles.length; tiles.forEach(([l, n, sub, col], i) => { const X = P + i * (TW + 10), Y = 102; box(X, Y, TW, 76, 12, T.panel, T.line);
     font(600, 12); x.fillStyle = T.muted; x.fillText(l.split("").join(String.fromCharCode(8202)), X + 14, Y + 24); font(700, 32); x.fillStyle = col; x.fillText(n, X + 14, Y + 62); font(400, 13); x.fillStyle = T.muted; const sw = x.measureText(sub).width; x.fillText(sub, X + TW - 14 - sw, Y + 62); });
   const HC = { OP: ["#1f4d33", "#2e7d4f"], SB: ["#4d4116", "#a8892c"], BD: ["#6b1f19", "#b3402f"], PM: ["#1d3a5f", "#3b6ea8"] };   // same as the hour board
@@ -1096,7 +1104,7 @@ async function statusPicture() {
   for (const g of groups) { const on = g.L.filter(m => !offNow(m)), wk = on.filter(m => ["OP", "SB"].includes(st(m))).length, RI = g.L.map(rowInfo), gh = RI.reduce((a2, r) => a2 + r.h, 0);
     box(P - 14, y, W - (P - 14) * 2, 40 + gh + 2, 12, T.panel, T.line); y += 4;   // each group in its own box: heading and its machines together
     font(700, 13); x.fillStyle = T.gold; x.fillText(g.g.toUpperCase().split("").join(String.fromCharCode(8202)), P, y + 22); const gw = x.measureText(g.g.toUpperCase().split("").join(String.fromCharCode(8202))).width;
-    font(500, 13); x.fillStyle = T.muted; const MG = g.L.map(m => mtdSum(m)).reduce((a2, q) => ({ avail: a2.avail + q.avail, down: a2.down + q.down }), { avail: 0, down: 0 }), tt = on.length ? `${wk}/${on.length} working · available this shift ${pcOf(g.T)} · month to date ${pcOf(MG)}` : `not on site · month to date ${pcOf(MG)}`; x.fillText(tt, P + Math.max(NW + 0, gw + 16), y + 22);
+    font(500, 13); x.fillStyle = T.muted; const MG = g.L.map(m => mtdSum(m)).reduce((a2, q) => ({ avail: a2.avail + q.avail, down: a2.down + q.down }), { avail: 0, down: 0 }), tt = on.length ? `${wk}/${on.length} working · shift ${pcOf(g.T)} · month ${pcOf(MG)}` : `not on site · month to date ${pcOf(MG)}`; x.fillText(tt, P + Math.max(NW + 0, gw + 16), y + 22);
     if (g === groups[0]) { font(500, 12); x.fillStyle = T.muted; HRL.forEach((h, k) => { const l = pad(h % 24); x.fillText(l, HX + k * (HW + HG) + (HW - x.measureText(l).width) / 2, y + 22); }); }
     x.fillStyle = T.line; x.fillRect(P, y + 32, W - P * 2, 1); y += 36;
     g.L.forEach((m, i) => { const r = RI[i], Y = y, t = r.t; if (i) { x.fillStyle = "#222826"; x.fillRect(P, Y, W - P * 2, 1); }
@@ -1110,12 +1118,23 @@ async function statusPicture() {
   x2.fillStyle = "#2d3431"; x2.fillRect(P, H2 - 54, W - P * 2, 1); x2.font = `400 14px "Inter","Segoe UI",Arial,sans-serif`; x2.fillStyle = "#a2a8a1"; x2.fillText("Live dashboard: protea98.github.io/tkr-operations/control", P, H2 - 20);
   const nm = `${me?.name || ""}`; if (nm) { const t2 = "Controller: " + nm; x2.fillText(t2, W - P - x2.measureText(t2).width, H2 - 20); }
   return c2; }
-async function showPicture(text) {
-  document.querySelector(".ccdone")?.remove(); const c = await statusPicture(), url = c.toDataURL("image/jpeg", 0.9), d = document.createElement("div"); d.className = "ccdone"; d.setAttribute("role", "dialog");
-  const name = `TKR_Control_Room_${today()}_${tOf(Date.now()).replace(":", "")}.jpg`;
-  d.innerHTML = `<div style="max-width:620px;width:100%"><div class="big">Status picture</div><img src="${url}" alt="Machine status picture" style="width:100%;border-radius:10px;border:1px solid #333;max-height:60vh;object-fit:contain;background:#121413">
+async function showPicture(text, view = "all") {
+  document.querySelector(".ccdone")?.remove(); const d = document.createElement("div"); d.className = "ccdone"; d.setAttribute("role", "dialog");
+  const tabsP = `<div class="row" style="gap:6px;margin:0 0 10px;flex-wrap:wrap">${PIC_VIEWS.map(([k, l]) => `<button class="sm${k === view ? " primary" : ""}" data-pv="${k}">${l}</button>`).join("")}</div>`;
+  if (view === "cem" && !cemBuses().length) { const B = fleet().flatMap(([g, L]) => /bus/i.test(g) ? L : []);   // which bus works for Cementation: picked once, kept for everyone
+    d.innerHTML = `<div style="max-width:620px;width:100%"><div class="big">Cementation bus</div>${tabsP}<p>Tick the bus (or buses) that work for Cementation. This is saved for every PC.</p><div class="row" style="gap:10px;flex-wrap:wrap">${B.map(m => `<label style="display:flex;gap:6px;align-items:center"><input type="checkbox" value="${esc(m)}"> ${esc(m)}</label>`).join("")}</div>
+      <div class="row" style="margin-top:12px;gap:6px"><button class="primary" data-pcem="1" style="flex:1">Save and show the picture</button><button class="ghost" data-p="x" style="flex:1">Close</button></div></div>`;
+    d.onclick = async e => { const b = e.target.closest("button"); if (!b) { if (e.target === d) d.remove(); return; } if (b.dataset.pv) { showPicture(text, b.dataset.pv); return; } if (b.dataset.p === "x") { d.remove(); return; }
+      if (b.dataset.pcem) { const cem = [...d.querySelectorAll("input:checked")].map(i => i.value); if (!cem.length) { toast("Tick at least one bus."); return; }
+        try { await put({ ...(byId("views") || { id: "views", kind: "views", ym: "setup" }), cem }, `Cementation bus set: ${cem.join(", ")}`); } catch { toast("Only the controller on duty or an admin can set this."); return; } showPicture(text, "cem"); } };
+    document.body.appendChild(d); return; }
+  const c = await statusPicture(view), url = c.toDataURL("image/jpeg", 0.9);
+  const name = `TKR_${view === "all" ? "Control_Room" : PIC_VIEWS.find(q => q[0] === view)[1].replace(/\s+/g, "_")}_${today()}_${tOf(Date.now()).replace(":", "")}.jpg`;
+  d.innerHTML = `<div style="max-width:620px;width:100%"><div class="big">Status picture</div>${tabsP}${view === "cem" ? `<p class="muted" style="margin:0 0 8px">Cementation bus: ${cemBuses().map(esc).join(", ")} · <button class="sm ghost" data-pcemreset="1">Change</button></p>` : ""}<img src="${url}" alt="Machine status picture" style="width:100%;border-radius:10px;border:1px solid #333;max-height:60vh;object-fit:contain;background:#121413">
     <div class="row" style="margin-top:10px;gap:6px"><button class="primary" data-p="share" style="flex:1">Send to WhatsApp</button><button data-p="dl" style="flex:1">Download picture</button><button data-p="text" style="flex:1">Copy message text</button><button class="ghost" data-p="x" style="flex:1">Close</button></div></div>`;
-  d.onclick = async e => { const b = e.target.closest("button"); if (!b) { if (e.target === d) d.remove(); return; } const blob = await new Promise(r => c.toBlob(r, "image/jpeg", 0.9));
+  d.onclick = async e => { const b = e.target.closest("button"); if (!b) { if (e.target === d) d.remove(); return; } if (b.dataset.pv) { showPicture(text, b.dataset.pv); return; }
+    if (b.dataset.pcemreset) { try { await put({ ...(byId("views") || { id: "views", kind: "views", ym: "setup" }), cem: [] }); } catch { toast("Only the controller on duty or an admin can change this."); return; } showPicture(text, "cem"); return; }
+    const blob = await new Promise(r => c.toBlob(r, "image/jpeg", 0.9));
     if (b.dataset.p === "share") { const f = new File([blob], name, { type: "image/jpeg" }); if (navigator.canShare?.({ files: [f] })) { try { await navigator.share({ files: [f], text: "Live dashboard: https://protea98.github.io/tkr-operations/control/" }); } catch {} } else { const { deliver } = await import("../lib/deliver.js"); deliver(blob, name); toast("Picture downloaded. Attach it in WhatsApp."); } }
     if (b.dataset.p === "dl") { const { deliver } = await import("../lib/deliver.js"); deliver(blob, name); }
     if (b.dataset.p === "text") { try { await navigator.clipboard.writeText(text); toast("Message text copied."); } catch { toast("Couldn't copy."); } }
