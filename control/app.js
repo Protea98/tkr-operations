@@ -5,7 +5,8 @@
 import { tabBar, pageHead, sheet, sheetClick, afterRender, closeSheet, icon } from "../lib/ui.js";
 import { bdData, chartPng as chartPng0 } from "../lib/metres-xlsx.js";
 const pngMemo = new Map();   // drawing a graph as a picture is slow: the same graph with the same numbers is drawn once
-const chartPng = (...a) => { const k = JSON.stringify(a); let v = pngMemo.get(k); if (v === undefined) { v = chartPng0(...a); if (pngMemo.size > 60) pngMemo.clear(); pngMemo.set(k, v); } return v; };
+const chartPng = (...a) => { const k = JSON.stringify(a); let v = pngMemo.get(k); if (v === undefined) { v = chartPng0(...a); try { const b64 = String(v.png).replace(/^data:[^,]*,/, ""), bin = atob(b64), u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i); v = { ...v, url: URL.createObjectURL(new Blob([u8], { type: "image/png" })) }; } catch {}
+  if (pngMemo.size > 60) { for (const x of pngMemo.values()) if (x?.url) URL.revokeObjectURL(x.url); pngMemo.clear(); } pngMemo.set(k, v); } return v; };   // on screen the graph is a short link to the picture, not the whole picture inside the page
 
 const $ = id => document.getElementById(id);
 const app = $("app");
@@ -254,7 +255,9 @@ function render() {
   $("who").innerHTML = me ? `${esc(me.name)} · <button class="sm ghost" data-logout="swap" style="min-height:36px;padding:2px 12px">Change controller</button><button class="sm danger" data-logout style="min-height:36px;padding:2px 12px">Log out</button>` : "";
   if (!me && viewer) { $("who").innerHTML = `Viewing only · <button class="sm" data-unview="1" style="min-height:36px;padding:2px 12px">Controller sign-in</button>`;
     const ws = app.querySelector(".xlsheet")?.scrollTop, wl = app.querySelector(".xlsheet")?.scrollLeft; if (MNT) { if (!["mnt", "pre"].includes(tab)) tab = "mnt"; } else if (tab !== "files") tab = "now";
-    lastHtml = ""; app.innerHTML = MNT ? tabBar(MNT_TABS, tab) + `<div class="ro">${tab === "pre" ? preView() : maintView()}</div>` : tabBar([["now", "Dashboard", "deploy"], ["files", "Documents", "docs"]], tab) + `<div class="ro">${tab === "files" ? filesView() : nowView()}</div>`; afterRender(app);
+    const vh = MNT ? tabBar(MNT_TABS, tab) + `<div class="ro">${tab === "pre" ? preView() : maintView()}</div>` : tabBar([["now", "Dashboard", "deploy"], ["files", "Documents", "docs"]], tab) + `<div class="ro">${tab === "files" ? filesView() : nowView()}</div>`;
+    if (vh === lastHtml && app.firstChild) return;   // nothing changed: leave the page alone (no redraw while someone is reading)
+    lastHtml = vh; app.innerHTML = vh; afterRender(app);
     const w = app.querySelector(".xlsheet"); if (w && ws != null) { w.scrollTop = ws; w.scrollLeft = wl; } return; }
   if (!me) { lastHtml = ""; app.innerHTML = `<div class="card viewcard"><b>Just want to see the machines?</b><span class="muted">Anyone can view the live board and the hours. Only controllers can change them.</span><button class="primary" data-view="1">View the dashboard</button></div>` + gateView(); return; }
   let body = "";
@@ -478,7 +481,7 @@ function delaySummary(m) {
     <details style="margin-top:10px"><summary style="cursor:pointer;font-weight:600">Every breakdown and maintenance, one by one (${lines.length})</summary><div class="tbl"><table class="avt"><thead><tr><th>Date</th><th>Machine</th><th>Type</th><th>From</th><th>To</th><th>Time</th><th>Cause</th><th>Reason / comments</th></tr></thead><tbody>
       ${lines.map(l => `<tr><td>${fmt(l.e.start.slice(0, 10))}</td><td><b>${esc(l.e.machine)}</b></td><td>${TYPES[l.e.type]}</td><td>${hhmm(l.e.start)}</td><td>${l.e.end ? (l.e.end.slice(0, 10) !== l.e.start.slice(0, 10) ? fmt(l.e.end.slice(0, 10)).slice(0, 5) + " " : "") + hhmm(l.e.end) : "still going"}</td><td class="num">${hm(l.h)}</td><td>${esc(l.cause)}</td><td>${esc(l.e.reason || "")}</td></tr>`).join("")}</tbody></table></div></details>
     ${drill}
-    <details style="margin-top:12px" open><summary style="cursor:pointer;font-weight:600">Graphs</summary><div style="display:grid;gap:12px;margin-top:8px">${(() => { try { return dsCharts(D).map(c => `<img src="${c.png}" alt="" style="width:100%;max-width:900px;height:auto;border:1px solid #e6e0d2;border-radius:6px">`).join(""); } catch { return ""; } })()}</div></details></section>`;
+    <details style="margin-top:12px" open><summary style="cursor:pointer;font-weight:600">Graphs</summary><div style="display:grid;gap:12px;margin-top:8px">${(() => { try { return dsCharts(D).map(c => `<img src="${c.url || c.png}" decoding="async" alt="" style="width:100%;max-width:900px;height:auto;border:1px solid #e6e0d2;border-radius:6px">`).join(""); } catch { return ""; } })()}</div></details></section>`;
 }
 function monthGrid(m) {
   const days = []; for (let x = m + "-01"; x <= monthEnd(m); x = addDays(x, 1)) days.push(x);
@@ -546,8 +549,10 @@ function sheetTabs() {
   return `<div class="xltabs"><button data-wbm="-1" aria-label="Month before">‹</button><b>${monthName(m)}</b><button data-wbm="1" aria-label="Next month" ${m >= today().slice(0, 7) ? "disabled" : ""}>›</button>
     <button class="xt ${sheetSel === "month" ? "on" : ""}" data-sh="month">Monthly Availability</button>${days.map(x => `<button class="xt ${sheetSel === x ? "on" : ""}" data-sh="${x}" ${x > today() ? "disabled" : ""}>${x.slice(8)} ${MONTHS[+x.slice(5, 7) - 1].slice(0, 3)}</button>`).join("")}</div>`;
 }
+let wbOpen = false;
 function workbookSection() {
   if (!sheetSel) sheetSel = date;
+  if (!me && !wbOpen) return `<h2 class="sect" style="margin-top:26px">Control room workbook</h2><p class="muted" style="margin-top:-4px">The day sheets with every hour box, as the controllers fill them in.</p><button class="primary" data-wbopen="1">Show the day sheets</button>`;   // viewers: the big sheet is only drawn when asked for, so the dashboard stays quick on a phone
   return `<h2 class="sect" style="margin-top:26px">Control room workbook</h2>${!me ? '<p class="muted" style="margin-top:-4px"><b>Viewing only.</b> The hours are filled in by the controller on shift.</p>' : ""}`
     + `<p class="muted ctl-only" style="margin-top:-4px">The same sheets as the Excel. Pick OP, BD or PM in each hour box, like on the Excel. When you pick BD or PM the exact time is logged by itself, and again when you pick OP. At the end of the shift tap <b>Save and upload</b>.</p>`
     + `<div class="xlwin"><div class="xlsheet">${sheetSel === "month" ? monthSheet(date.slice(0, 7)) : daySheet(sheetSel)}</div>${sheetTabs()}</div>`;
@@ -1594,6 +1599,7 @@ document.addEventListener("click", async ev => {
 }, true);
 async function clickH(ev) {
   const vb = ev.target.closest("[data-view],[data-unview]");
+  if (ev.target.closest("[data-wbopen]")) { wbOpen = true; render(); return; }
   if (vb) { viewer = !!vb.dataset.view; if (!viewer) { pinFor = null; adminStep = ""; } render(); if (viewer) syncNow(false).then(() => { if (viewer && !me) render(); }); return; }
   if (!me) { if (viewer) { if (sheetClick(ev, app)) return; const b = ev.target.closest("[data-sh],[data-wbm],[data-tab],[data-ddl],[data-dview],[data-dzip],[data-fzip],[data-mnav],[data-fsub],[data-fpick],[data-fm]"); if (!b) return; } }   // viewing only: nothing can be changed
   const hb = ev.target.closest("[data-hcell]"); if (hb) { if (!me) return; cellMenu(hb); return; }
