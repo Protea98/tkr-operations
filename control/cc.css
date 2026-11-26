@@ -264,3 +264,7 @@ td.svc.due{background:#fde2de!important}td.svc.due small.left{color:#c0392b;font
 /* maintenance */
 .mntbar{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:60;display:flex;gap:10px;align-items:center;flex-wrap:wrap;max-width:min(92vw,720px);background:#1a1c1a;color:#f2efe6;border:1px solid #d4a12a;border-radius:12px;padding:10px 14px;box-shadow:0 8px 24px rgba(0,0,0,.4);font-size:14px}
 table.mini.mnt td{vertical-align:top}table.mini.mnt td .sm{margin:2px 0}
+/* rockbreakers in the Pit this shift */
+.pitticks.need{border:1px solid #d4a12a;background:rgba(212,161,42,.08)}
+.pitticks .pt{display:inline-flex!important;flex-direction:row!important;gap:6px;align-items:center;font-size:15px;cursor:pointer;margin:0}
+.pitticks .pt input{width:20px;height:20px;accent-color:#d4a12a}
