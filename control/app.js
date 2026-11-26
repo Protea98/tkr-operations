@@ -305,7 +305,9 @@ function nowView() {
       <div class="tile"><div class="l">Maintenance</div><div class="n">${cnt("PM")}</div><div class="s">${nOff ? nOff + " not on site" : "now"}</div></div></div>`
     + `<div class="fleet">${F.map(([g, L]) => { const gT = fleetSum(L, m => shiftSum(m, sd, ssh)); return `<section class="grp"><h3>${esc(g)}<span>${L.every(offNow) ? "not on site" : `${L.filter(m => ["OP", "?"].includes(stateNow(m))).length}/${L.filter(m => !offNow(m)).length} working${L.some(m => stateNow(m) === "SB") ? ` · ${L.filter(m => stateNow(m) === "SB").length} refuelling` : ""} · ${pcOf(gT)}`}</span></h3><div class="mlist">${L.map(m => { const s0 = statusNow(m), st = stateNow(m), s = s0 && s0.type === st ? s0 : null; return `<button class="mach ${s ? s.type : st === "?" ? "UN" : st}" data-mach="${esc(m)}"><b>${esc(m)}</b><small>${st === "OFF" ? "Not on site" : s ? `${TYPES[s.type]}${(() => { const k = downSince(m, s.type); return k ? ` since ${tOf(k)}${ymd(new Date(k)) !== today() ? " " + fmt(ymd(new Date(k))).slice(0, 5) : ""}` : ""; })()}` : st === "OP" ? "Operating" : st === "SB" ? "Refuelling" : st === "?" ? "Operational" : (TYPES[st] || st) + (() => { const k = ["BD", "PM"].includes(st) ? downSince(m, st) : null; return k ? ` since ${tOf(k)}${ymd(new Date(k)) !== today() ? " " + fmt(ymd(new Date(k))).slice(0, 5) : ""}` : ""; })()}</small>${st !== "OP" && st !== "?" && reasonNow(m) ? `<small class="why">${esc(reasonNow(m))}</small>` : ""}</button>`; }).join("")}</div>
         <div class="row" style="margin-top:8px;gap:6px"><button class="sm" data-addmg="${F.findIndex(x => x[0] === g)}">+ Add machine</button>${L.length ? `<button class="sm ghost" data-rmmg="${F.findIndex(x => x[0] === g)}">− Remove machine</button><button class="sm ghost" data-sitemg="${F.findIndex(x => x[0] === g)}">On site / not on site</button>` : ""}</div></section>`; }).join("")}</div>`
+    + `<h2 class="secth">Rompad and Pit project</h2>` + areaCards()
     + hourBoard()
+    + `<div class="openers">${sheet("mtd", `Month-to-date availability · ${monthName(today().slice(0, 7))}`, mtdCard(), { icon: icon("hours"), sub: "every machine from the 1st to now, times in h:mm" })}${sheet("svc", "Hours until next service", svcCard(), { icon: icon("hours"), sub: "a hyphen where the next service reading is not set yet" })}</div>`
     + `<div class="openers">${sheet("open", `Still down now (${open.length})`, open.map(evLine).join("") || '<p class="muted">Nothing open with a logged time.</p>', { icon: "!", count: open.length, cls: open.length ? "alert" : "good", sub: "breakdowns, standby and maintenance not closed yet" })}
       ${sheet("todayev", "This shift's breakdowns and maintenance", `<div class="res">${SE.map(seLine).join("") || '<p class="muted">Nothing on this shift yet.</p>'}</div>`, { icon: icon("bd"), count: SE.length, sub: `${ssh.toLowerCase()} shift from ${ssh === "Day" ? "06:00" : "18:00"}, from the sheet and the logged times` })}
       ${sheet("delays", `Delay summary · ${monthName(today().slice(0, 7))}`, delaySummary(today().slice(0, 7)), { icon: icon("bd"), sub: "lost time per machine and per cause this month" })}
@@ -628,6 +630,37 @@ function lastMeter(mc, upTo) { let best = null; for (const r of recs) { if (r.ki
 function toNextPM(mc, upTo = today()) { const at = pmRec()?.at?.[mc]; if (at === undefined || at === "" || at === null) return null; const m0 = lastMeter(mc, upTo); return m0 == null ? null : +at - m0; }
 const pmText = (mc, upTo) => { const v = toNextPM(mc, upTo); return v == null ? "-" : v < 0 ? `overdue by ${hm(-v)} h` : `${hm(v)} h`; };
 const prevShift = (d, sh) => sh === "Day" ? [addDays(d, -1), "Night"] : [d, "Day"];
+/* month to date: availability per machine from the 1st of the month to now (same rules as the day sheets) */
+function mtdSum(mc, ym = today().slice(0, 7)) { const k = `mtd|${mc}|${ym}`; if (lkMemo.has(k)) return lkMemo.get(k);
+  let avail = 0, down = 0, BD = 0, PM = 0; const end = ym === today().slice(0, 7) ? today() : monthEnd(ym);
+  for (let d = ym + "-01"; d <= end; d = addDays(d, 1)) { const x = daySum(mc, d); if (x) { avail += x.avail; down += x.down; BD += x.BD; PM += x.PM; } }
+  const r = { avail, down, BD, PM }; lkMemo.set(k, r); return r; }
+/* rockbreakers: where each machine worked each shift – Rompad (Voyager, Genesis) or the Pit project. Carried on from the shift before until it is changed. */
+const AREAS = ["Rompad", "Pit project"];
+const isRB = mc => fleet().some(([g, L]) => /rock/i.test(g) && L.includes(mc));
+function areaOf(d, mc, sh) { const k = `area|${d}|${mc}|${sh}`; if (lkMemo.has(k)) return lkMemo.get(k); let [d2, s2] = [d, sh], v = null;
+  for (let i = 0; i < 120 && !v; i++) { v = byId(`hr_${d2}_${mc}`)?.area?.[s2] || null; [d2, s2] = prevShift(d2, s2); }
+  v = v || (mc === "TKRH017" ? "Pit project" : "Rompad"); lkMemo.set(k, v); return v; }
+/* machine hours of one shift: hour meter (closing – opening) where captured, otherwise the OP boxes */
+function shiftMachHrs(d, mc, sh) { const m = meterHrs(meterOf(d, mc, sh)); if (m != null) return m; const C = cellsOf(d, mc), n = HRS(sh).filter(h => C[h] === "OP").length; return n || 0; }
+function areaMonth(ym = today().slice(0, 7)) { const out = Object.fromEntries(AREAS.map(a => [a, { hrs: 0, avail: 0, down: 0, BD: 0, PM: 0, per: {} }])), end = ym === today().slice(0, 7) ? today() : monthEnd(ym);
+  const RB = fleet().flatMap(([g, L]) => /rock/i.test(g) ? L : []);
+  for (let d = ym + "-01"; d <= end; d = addDays(d, 1)) for (const sh of ["Day", "Night"]) { if (shiftWin(d, sh)[0] > Date.now()) continue;
+    for (const mc of RB) { const A = out[areaOf(d, mc, sh)] || out.Rompad, x = shiftSum(mc, d, sh), h = shiftMachHrs(d, mc, sh), p = A.per[mc] = A.per[mc] || { hrs: 0, shifts: 0, avail: 0, down: 0 };
+      if (!x.filled && !x.down && !h) continue; A.hrs += h; A.avail += x.avail; A.down += x.down; A.BD += x.BD; A.PM += x.PM; p.hrs += h; p.shifts++; p.avail += x.avail; p.down += x.down; } }
+  return out; }
+function areaCards() { const ym = today().slice(0, 7), M = areaMonth(ym), { d, sh } = shiftNow(), RB = fleet().flatMap(([g, L]) => /rock/i.test(g) ? L : []);
+  return `<div class="areas">${AREAS.map(a => { const A = M[a], now = RB.filter(mc => !offNow(mc) && areaOf(d, mc, sh) === a), per = Object.entries(A.per).filter(([, p]) => p.shifts).sort((x, y) => y[1].hrs - x[1].hrs);
+    return `<section class="card area"><h3>${a === "Pit project" ? "Pit project" : "Rompad"} <small class="muted">· ${monthName(ym)} to date</small></h3>
+      <div class="tiles ctiles"><div class="tile"><div class="l">Machine hours</div><div class="n">${hm(A.hrs)}</div><div class="s">month to date</div></div><div class="tile good"><div class="l">Availability</div><div class="n">${pcOf(A)}</div><div class="s">month to date</div></div><div class="tile ${A.BD ? "alert" : ""}"><div class="l">Breakdown</div><div class="n">${hm(A.BD)}</div><div class="s">h:mm this month</div></div></div>
+      <p class="muted" style="margin:6px 0">${sh} shift now: ${now.length ? now.map(esc).join(", ") : "-"}</p>
+      <table class="mini"><thead><tr><th>Machine</th><th>Shifts</th><th>Machine hrs</th><th>Availability</th></tr></thead><tbody>${per.map(([mc, p]) => `<tr><td>${esc(mc)}</td><td>${p.shifts}</td><td>${hm(p.hrs)}</td><td>${pcOf(p)}</td></tr>`).join("") || `<tr><td colspan="4">-</td></tr>`}</tbody></table></section>`; }).join("")}</div>`; }
+function mtdCard() { const ym = today().slice(0, 7), F = fleet();
+  return `<table class="mini"><thead><tr><th>Machine</th><th>Available</th><th>Breakdown</th><th>Maintenance</th><th>Availability</th><th>Machine hrs</th></tr></thead><tbody>${F.map(([g, L]) => { const G = L.map(mc => mtdSum(mc, ym)), T0 = G.reduce((a, x) => ({ avail: a.avail + x.avail, down: a.down + x.down }), { avail: 0, down: 0 });
+    return `<tr class="gh"><td colspan="4"><b>${esc(g)}</b></td><td><b>${pcOf(T0)}</b></td><td></td></tr>` + L.map((mc, i) => { const x = G[i], mh = machHrsIn(ym, mc); return `<tr><td>${esc(mc)}</td><td>${hm(x.avail)}</td><td>${hm(x.BD)}</td><td>${hm(x.PM)}</td><td><b>${pcOf(x)}</b></td><td>${mh == null ? "-" : hm(mh)}</td></tr>`; }).join(""); }).join("")}</tbody></table>`; }
+function svcCard() { const F = fleet(), P = pmRec()?.at || {};
+  return `<p class="muted" style="margin-top:0">Hours left = next service reading minus the latest closing hours. A hyphen means the next service reading or the hour meter is not known yet (admin: Settings → Next maintenance).</p><table class="mini"><thead><tr><th>Machine</th><th>Latest hour meter</th><th>Next service at</th><th>Hours left</th></tr></thead><tbody>${F.map(([g, L]) => `<tr class="gh"><td colspan="4"><b>${esc(g)}</b></td></tr>` + L.map(mc => { const lm = lastMeter(mc, today()), at = P[mc], v = toNextPM(mc);
+    return `<tr><td>${esc(mc)}</td><td>${lm == null ? "-" : mtxt(lm)}</td><td>${at === undefined || at === "" || at === null ? "-" : mtxt(at)}</td><td${v != null && v < 0 ? ' style="color:#c0392b;font-weight:700"' : ""}>${pmText(mc)}</td></tr>`; }).join("")).join("")}</tbody></table>`; }
 function lastClose(d, mc, sh) { let [d2, s2] = prevShift(d, sh); for (let i = 0; i < 60; i++) { const m = meterOf(d2, mc, s2); if (m.close != null && m.close !== "") return +m.close; if (m.open != null && m.open !== "") return null; [d2, s2] = prevShift(d2, s2); } return null; }
 const meterHrs = m => m.open !== undefined && m.open !== "" && m.close !== undefined && m.close !== "" && +m.close >= +m.open ? +m.close - +m.open : null;
 const mtxt = v => v == null || v === "" ? "" : String(Math.round(+v * 10) / 10).replace(".", ",");
@@ -637,11 +670,14 @@ async function setMeter(mc, d, sh, k, raw) {
   const m = { ...(rec.meter?.[sh] || {}), [k]: v === "" ? "" : +v };
   if (m.open !== undefined && m.open !== "" && m.close !== undefined && m.close !== "" && +m.close < +m.open) { toast("The closing hours can't be lower than the opening hours."); return false; }
   await put({ ...rec, deleted: false, meter: { ...(rec.meter || {}), [sh]: m } }, `${mc} ${sh.toLowerCase()} shift ${k === "open" ? "opening" : "closing"} hours: ${v ? mtxt(v) : "cleared"}`); return true; }
+function firstDay(mc) { const k = "first|" + mc; if (lkMemo.has(k)) return lkMemo.get(k); let f = today();
+  for (const r of recs) if (r.kind === "hr" && !r.deleted && r.machine === mc && r.date < f && (Object.values(r.cells || {}).some(v => v && v !== "-") || Object.values(r.meter || {}).some(m => meterHrs(m) != null))) f = r.date;
+  for (const e of downEvs(mc)) { const d0 = String(e.start).slice(0, 10); if (d0 < f) f = d0; } lkMemo.set(k, f); return f; }
 function shiftTable(d, sh) {
   const [a, b] = shiftWin(d, sh), now = Date.now(), fut = a > now, H = HRS(sh);
   const tot = () => ({ avail: 0, BD: 0, PM: 0, down: 0 }), shT = tot(); let body = "";
   const opt = v => ["", "OP", "SB", "BD", "PM"].map(o => `<option value="${o}" ${o === v ? "selected" : ""}>${o === "SB" ? "RF" : o}</option>`).join("");
-  for (const [g, L] of fleet()) { const gt = tot(), opCount = H.map(() => 0);
+  for (const [g, L0] of fleet()) { const L = L0.filter(mc => d >= firstDay(mc)); if (!L.length) continue; const gt = tot(), opCount = H.map(() => 0);   // a machine shows from the first day anything was captured for it, so empty rows don't look like missing days
     L.forEach((mc, i) => { const hr = recs.find(r => r.id === `hr_${d}_${mc}` && !r.deleted), C = cellsOf(d, mc), E = downEvs(mc).filter(e => toMs(e.start) < b && evEnd(e) > a).sort((x, y) => toMs(x.start) - toMs(y.start)), s = shiftSum(mc, d, sh);
       const reason = [...new Set([...E.map(e => e.reason), hr?.notes?.[sh]].filter(Boolean))].join("; ");
       const cells = H.map((h, k) => { const v = cellVal(d, mc, h, C); if (v === "OP") opCount[k]++;
@@ -658,7 +694,7 @@ function shiftTable(d, sh) {
           st2 = `style="background:linear-gradient(to right,${pc} 0% ${k1}%,#888 ${k1}% ${k1 + 1}%,${nc} ${k1 + 1}% ${done}%,#fff ${done}% 100%)!important;color:#222"`; lb = `<span style="font-size:9.5px;line-height:1.15;display:block"><b>${spl.v === "SB" ? "RF" : "OP"}</b> → <b>${v === "SB" ? "RF" : "OP"}</b><br>${tOf(spl.at)}</span>`; }
         return `<td class="hc"><button type="button" data-hcell="${esc(mc)}|${h}" data-v="${v}" ${st2} class="hbtn ty ${v}${carry ? " carry" : ""}${auto ? " auto" : ""}" title="${carry ? "Carried on from a breakdown that has not been closed. Tap and pick OP if it was working." : "Tap to pick OP, RF, BD or PM. Tap the same one again to clear it."}">${lb}</button></td>`; }).join("");
       const tm = (e, end) => end ? (e.end ? (toMs(e.end) <= b ? hhmm(e.end) : "") : "") : (toMs(e.start) < a ? tOf(a) : hhmm(e.start));
-      body += `<tr data-mach="${esc(mc)}">${i ? "" : `<td rowspan="${L.length}" class="grpc">${esc(g)}</td>`}<td class="lt"><button type="button" class="mbtn" data-mdocs="${esc(mc)}" title="Tap to see and upload the documents for ${esc(mc)}">${esc(mc)}</button></td>${(() => { const m = meterOf(d, mc, sh), lc = lastClose(d, mc, sh), mh = meterHrs(m);
+      body += `<tr data-mach="${esc(mc)}">${i ? "" : `<td rowspan="${L.length}" class="grpc">${esc(g)}</td>`}<td class="lt"><button type="button" class="mbtn" data-mdocs="${esc(mc)}" title="Tap to see and upload the documents for ${esc(mc)}">${esc(mc)}</button>${isRB(mc) ? `<select class="areasel" data-area="${esc(mc)}" title="Where this machine worked this shift">${AREAS.map(x => `<option ${areaOf(d, mc, sh) === x ? "selected" : ""}>${x}</option>`).join("")}</select>` : ""}</td>${(() => { const m = meterOf(d, mc, sh), lc = lastClose(d, mc, sh), mh = meterHrs(m);
           return `<td class="mt"><input data-meter="${esc(mc)}|open" inputmode="decimal" value="${mtxt(m.open)}" placeholder="${lc != null ? mtxt(lc) : "opening"}" title="Hour meter at the start of the shift${lc != null ? ". Last closing: " + mtxt(lc) : ""}"></td><td class="mt"><input data-meter="${esc(mc)}|close" inputmode="decimal" value="${mtxt(m.close)}" placeholder="closing" title="Hour meter at the end of the shift"></td><td>${mh != null ? hm(mh) : ""}</td>`; })()}${cells}
         <td class="tm">${E.length ? E.map(e => `<span data-edit="${e.id}" class="${evLocked(e) ? "lk" : ""}" title="Tap to correct">${tm(e)}</span>`).join("<br>") : `<span data-newev="${esc(mc)}" title="Log a breakdown with exact times" style="color:#999">+ time</span>`}</td><td class="tm">${E.map(e => `<span data-edit="${e.id}" class="${lockedV(e, "end") ? "lk" : ""}" title="Tap to correct">${tm(e, 1) || "…"}</span>`).join("<br>")}</td>
         <td>${(() => { const lr = E.find(e => lockedV(e, "reason")); return lr ? `<input readonly class="rsn lk" data-edit="${lr.id}" value="${esc(reason)}">` : `<input data-reason="${esc(mc)}" value="${esc(reason)}" class="rsn" placeholder="${E.length ? "" : "comment"}">`; })()}</td><td>${s.filled ? n2(s.avail) : ""}</td><td class="${s.BD ? "hot" : ""}">${s.filled || s.BD ? n2(s.BD) : ""}</td><td>${s.filled || s.PM ? n2(s.PM) : ""}</td><td>${s.filled || s.down ? n2(s.down) : ""}</td></tr>`;
@@ -822,8 +858,8 @@ async function statusPicture() {
   font(700, 26); x.fillStyle = T.fg; x.fillText("Control Room – machine status", P + 66, 40);
   font(500, 15); x.fillStyle = T.muted; x.fillText(`TKR Operations · Tharisa · ${dow(sd)} ${fmt(sd)} · ${ssh} shift · ${tOf(now)}`, P + 66, 64);
   x.fillStyle = T.line; x.fillRect(P, 86, W - P * 2, 1);
-  const tiles = [["AVAILABLE", pcOf(shT), "this shift", T.ok], ["WORKING", `${cnt("OP") + cnt("SB")}/${ALL.length}`, cnt("SB") ? `${cnt("SB")} refuelling` : "machines", T.fg], ["BREAKDOWN", String(cnt("BD")), "now", cnt("BD") ? T.bad : T.fg], ["MAINTENANCE", String(cnt("PM")), "now", T.fg]];
-  const TW = (W - P * 2 - 3 * 10) / 4; tiles.forEach(([l, n, sub, col], i) => { const X = P + i * (TW + 10), Y = 102; box(X, Y, TW, 76, 12, T.panel, T.line);
+  const MA = ALL.map(m => mtdSum(m)).reduce((a2, q) => ({ avail: a2.avail + q.avail, down: a2.down + q.down }), { avail: 0, down: 0 }), tiles = [["AVAILABLE", pcOf(shT), "this shift", T.ok], ["MONTH TO DATE", pcOf(MA), "available", T.ok], ["WORKING", `${cnt("OP") + cnt("SB")}/${ALL.length}`, cnt("SB") ? `${cnt("SB")} refuelling` : "machines", T.fg], ["BREAKDOWN", String(cnt("BD")), "now", cnt("BD") ? T.bad : T.fg], ["MAINTENANCE", String(cnt("PM")), "now", T.fg]];
+  const TW = (W - P * 2 - (tiles.length - 1) * 10) / tiles.length; tiles.forEach(([l, n, sub, col], i) => { const X = P + i * (TW + 10), Y = 102; box(X, Y, TW, 76, 12, T.panel, T.line);
     font(600, 12); x.fillStyle = T.muted; x.fillText(l.split("").join(String.fromCharCode(8202)), X + 14, Y + 24); font(700, 32); x.fillStyle = col; x.fillText(n, X + 14, Y + 62); font(400, 13); x.fillStyle = T.muted; const sw = x.measureText(sub).width; x.fillText(sub, X + TW - 14 - sw, Y + 62); });
   const HC = { OP: ["#1f4d33", "#2e7d4f"], SB: ["#4d4116", "#a8892c"], BD: ["#6b1f19", "#b3402f"], PM: ["#1d3a5f", "#3b6ea8"] };   // same as the hour board
   const block = (m, h, X, Y, w, hh) => {   // one hour box, split by the real times like the hour board
@@ -849,15 +885,15 @@ async function statusPicture() {
     const h0 = sc ? (now - sc) / 36e5 : 0, out = sc ? (h0 >= 48 ? `out ${Math.floor(h0 / 24)} days` : `out ${hm(h0)} h`) : "";
     const head = `${LBL[t] || t}${sc ? " since " + (ymd(new Date(sc)) !== today() ? fmt(ymd(new Date(sc))).slice(0, 5) : tOf(sc)) : ""}${out ? " · " + out : ""}`;
     font(400, 13); const WL = why ? wrap(why, SW - 12, 3) : [], plan = dn ? [e?.action, e?.owner && "by " + e.owner, e?.eta ? "back " + fmt(e.eta) : "ETA to be confirmed"].filter(Boolean).join(" · ") : "";
-    const PL = plan ? wrap(plan, SW - 12, 2) : []; return { t, head, WL, PL, h: Math.max(RH + 8, 30 + (WL.length + PL.length) * 17 + 6) }; };
+    const PL = plan ? wrap(plan, SW - 12, 2) : []; return { t, head, WL, PL, h: Math.max(RH + 8, 66, 30 + (WL.length + PL.length) * 17 + 6) }; };
   for (const g of groups) { const on = g.L.filter(m => !offNow(m)), wk = on.filter(m => ["OP", "SB"].includes(st(m))).length, RI = g.L.map(rowInfo), gh = RI.reduce((a2, r) => a2 + r.h, 0);
     box(P - 14, y, W - (P - 14) * 2, 40 + gh + 2, 12, T.panel, T.line); y += 4;   // each group in its own box: heading and its machines together
     font(700, 13); x.fillStyle = T.gold; x.fillText(g.g.toUpperCase().split("").join(String.fromCharCode(8202)), P, y + 22); const gw = x.measureText(g.g.toUpperCase().split("").join(String.fromCharCode(8202))).width;
-    font(500, 13); x.fillStyle = T.muted; const tt = on.length ? `${wk}/${on.length} working · ${pcOf(g.T)}` : "not on site"; x.fillText(tt, P + Math.max(NW + 0, gw + 16), y + 22);
+    font(500, 13); x.fillStyle = T.muted; const MG = g.L.map(m => mtdSum(m)).reduce((a2, q) => ({ avail: a2.avail + q.avail, down: a2.down + q.down }), { avail: 0, down: 0 }), tt = on.length ? `${wk}/${on.length} working · shift ${pcOf(g.T)} · month to date ${pcOf(MG)}` : `not on site · month to date ${pcOf(MG)}`; x.fillText(tt, P + Math.max(NW + 0, gw + 16), y + 22);
     if (g === groups[0]) { font(500, 12); x.fillStyle = T.muted; HRL.forEach((h, k) => { const l = pad(h % 24); x.fillText(l, HX + k * (HW + HG) + (HW - x.measureText(l).width) / 2, y + 22); }); }
     x.fillStyle = T.line; x.fillRect(P, y + 32, W - P * 2, 1); y += 36;
     g.L.forEach((m, i) => { const r = RI[i], Y = y, t = r.t; if (i) { x.fillStyle = "#222826"; x.fillRect(P, Y, W - P * 2, 1); }
-      font(700, 17); x.fillStyle = T.fg; x.fillText(m, P, Y + 26); font(400, 11.5); x.fillStyle = T.muted; x.fillText(fit("Next maint.: " + pmText(m), NW - 8), P, Y + 42);   // hours to next maintenance, a hyphen until it is set
+      font(700, 17); x.fillStyle = T.fg; x.fillText(m, P, Y + 26); font(400, 11.5); x.fillStyle = T.muted; x.fillText(fit("Month to date " + pcOf(mtdSum(m)), NW - 8), P, Y + 42); x.fillText(fit("Next service: " + pmText(m), NW - 8), P, Y + 57);   // hours to next maintenance, a hyphen until it is set
       font(500, 14); x.fillStyle = t === "OP" ? T.ok : t === "BD" ? T.bad : t === "PM" ? T.pm : t === "SB" ? T.sb : T.muted; x.fillText(fit(r.head, SW - 12), P + NW, Y + 24);
       let ly = Y + 24; font(400, 13); x.fillStyle = "#d8d3c4"; for (const ln of r.WL) { ly += 17; x.fillText(ln, P + NW, ly); }
       x.fillStyle = T.muted; for (const ln of r.PL) { ly += 17; x.fillText(ln, P + NW, ly); }
@@ -1439,6 +1475,8 @@ async function changeH(ev) {
   if (!me) return;
   const t = ev.target;
   if (t.dataset.cell !== undefined) { const [mc, h] = t.dataset.cell.split("|"); await setCell($("fDay").dataset.date, mc, +h, t.value); render(); app.querySelector(`select[data-cell="${CSS.escape(t.dataset.cell)}"]`)?.focus({ preventScroll: true }); return; }
+  if (t.dataset.area) { const f = $("fDay"), tr = t.closest("table.av"), mc = t.dataset.area, d = f.dataset.date, sh = tr.dataset.shift, id = `hr_${d}_${mc}`, rec = recs.find(r => r.id === id && !r.deleted) || { id, kind: "hr", ym: d.slice(0, 7), date: d, machine: mc, cells: {} };
+    await put({ ...rec, deleted: false, area: { ...(rec.area || {}), [sh]: t.value } }, `${mc} ${sh.toLowerCase()} shift work area: ${t.value}`); toast("Saved"); render(); return; }
   if (t.dataset.meter) { const f = $("fDay"), tr = t.closest("table.av"), [mc, k] = t.dataset.meter.split("|"); if (await setMeter(mc, f.dataset.date, tr.dataset.shift, k, t.value)) { toast("Saved"); render(); } else render(); return; }
   if (t.dataset.reason !== undefined) { const f = $("fDay"), tr = t.closest("table.av"); await setReason(t.dataset.reason, f.dataset.date, tr.dataset.shift, t.value.trim()); toast("Saved"); return; }
   if (t.closest && t.closest("#fDay") && t.closest("tr[data-item]")) { const f = $("fDay"), d = f.dataset.date, tr = t.closest("tr[data-item]"), it = tr.dataset.item, id = chkKey(d, it);
@@ -1492,7 +1530,7 @@ async function syncNow(manual) {
     const snap = full ? await getDocs(query(collection(db, "ctrl"), where("ym", "in", yms))) : { docs: [] }; if (full) sync.fullAt = Date.now();
     let n = 0; for (const d of snap.docs) { const r = d.data(), have = recs.find(x => x.id === r.id);
       if (!have || (r.editedAt || 0) > (have.editedAt || 0)) { const nr = { ...r, synced: r.editedAt }; await tx("readwrite", t => t.objectStore("rec").put(nr)); n++; } }
-    recs = await all(); bump(); dutyCheck(); await approvePhumi().catch(() => {}); if (me) { await backfillRigs(); await busUpdate(); await seedFleetReports(); await clearAhead(); await purgeFuture(); await undoDay21(); await restoreDay21(); await busesDown21(); await joinRuns(); await cof22(); await seedChats2().catch(e => console.warn(e)); await fixDown26().catch(e => console.warn(e)); await drillsZero().catch(e => console.warn(e)); await seedReports3().catch(e => console.warn(e)); await healCells(); await fixNames().catch(e => console.warn(e)); await keepAchieved(); } sync.bad = bad; if (!bad) { sync.last = Date.now(); await metaSet("syncLast", sync.last); } liveWatch(yms); sync.msg = `Sent and checked ${new Date(Date.now()).toTimeString().slice(0, 5)}${n ? ` · ${n} changes from other devices` : ""}.`;
+    recs = await all(); bump(); dutyCheck(); await approvePhumi().catch(() => {}); if (me) { await backfillRigs(); await busUpdate(); await seedFleetReports(); await clearAhead(); await purgeFuture(); await undoDay21(); await restoreDay21(); await busesDown21(); await joinRuns(); await cof22(); await seedChats2().catch(e => console.warn(e)); await fixDown26().catch(e => console.warn(e)); await drillsZero().catch(e => console.warn(e)); await seedReports3().catch(e => console.warn(e)); await seedAreas().catch(e => console.warn(e)); await healCells(); await fixNames().catch(e => console.warn(e)); await keepAchieved(); } sync.bad = bad; if (!bad) { sync.last = Date.now(); await metaSet("syncLast", sync.last); } liveWatch(yms); sync.msg = `Sent and checked ${new Date(Date.now()).toTimeString().slice(0, 5)}${n ? ` · ${n} changes from other devices` : ""}.`;
     if (manual) toast("The TKR app is up to date.");
   } catch (e) { console.warn(e); sync.msg = e?.code === "permission-denied" ? "The TKR app's Firebase rules don't allow the Control Room yet (Muneer publishes them once)." : "Couldn't reach the TKR app. It tries again by itself."; if (manual) toast(sync.msg); }
   sync.busy = false; if (me && !sheetDirty && !document.activeElement?.closest?.("#fDay") && !document.getElementById("evPanel") && !document.querySelector(".sheet:not([hidden])")) render();
@@ -1568,6 +1606,17 @@ async function seedReports3() {
       if (!ch) continue; n++;
       await put({ ...(old || { id, kind: "hr", ym: d.slice(0, 7), date: d, machine: mc }), deleted: false, cells, notes, meter, seed: 1 }, null, AD); } }
   await put({ id: KEY, kind: "seed", ym: "setup", at: now, date: today() }, `Rockbreakers 01/11/2026 to 25/11/2026 captured by Admin from the signed fleet reports and the WhatsApp reports (${n} machine days)`, AD);
+  undo = keep; await metaSet("undo", undo).catch(() => {}); bump(); render(); }
+/* once: where each rockbreaker worked each shift 01/11 to 25/11/2026 (Rompad or Pit project), from the fleet reports and the WhatsApp reports. Done by Admin. */
+const RB_AREA = {"TKRH011":[["2026-11-01|Day","Rompad"],["2026-11-09|Night","Pit project"],["2026-11-10|Night","Rompad"],["2026-11-11|Night","Pit project"],["2026-11-13|Day","Rompad"]],"TKRH015":[["2026-11-01|Day","Rompad"]],"TKRH017":[["2026-11-01|Day","Pit project"]],"TKRH019":[["2026-11-01|Day","Rompad"],["2026-11-02|Day","Pit project"],["2026-11-11|Night","Rompad"],["2026-11-12|Night","Pit project"],["2026-11-18|Night","Rompad"]],"TKRH020":[["2026-11-01|Day","Rompad"],["2026-11-18|Day","Pit project"],["2026-11-19|Day","Rompad"]],"TKRH021":[["2026-11-01|Day","Rompad"]]};
+async function seedAreas() {
+  const KEY = "seed_rb_area_2026-11-26"; if (recs.some(r => r.id === KEY)) return;
+  const keep = undo.slice(), have = new Set(fleet().flatMap(([, L]) => L)); let n = 0;
+  for (const [mc, CH] of Object.entries(RB_AREA)) { if (!have.has(mc)) continue; let cur = CH[0][1];
+    for (let d = "2026-11-01"; d <= "2026-11-25"; d = addDays(d, 1)) { const id = `hr_${d}_${mc}`, old = recs.find(r => r.id === id && !r.deleted), area = { ...(old?.area || {}) }; let ch = false;
+      for (const sh of ["Day", "Night"]) { const c = CH.find(([k]) => k === `${d}|${sh}`); if (c) cur = c[1]; if (area[sh] !== cur) { area[sh] = cur; ch = true; } }
+      if (!ch) continue; n++; await put({ ...(old || { id, kind: "hr", ym: d.slice(0, 7), date: d, machine: mc, cells: {} }), deleted: false, area }, null, "Admin"); } }
+  await put({ id: KEY, kind: "seed", ym: "setup", at: Date.now(), date: today() }, `Rockbreaker work areas (Rompad or Pit project) 01/11/2026 to 25/11/2026 captured by Admin from the fleet reports and WhatsApp reports (${n} machine days)`, "Admin");
   undo = keep; await metaSet("undo", undo).catch(() => {}); bump(); render(); }
 async function seedChats() {
   const KEY = "seed_chats_2026-11-26"; if (recs.some(r => r.id === KEY)) return;

@@ -227,3 +227,12 @@ table.xl td.mt input{width:92px;min-width:80px;text-align:right}
   .ro .phead .row,.ro [data-tab="files"].primary,.ro .phead button[data-tab]{display:none!important}
 }
 .hb.MIX b,.hb.now b{white-space:nowrap;font-size:11px!important;letter-spacing:-.2px}
+/* Rompad and Pit project, month to date, next service */
+.secth{font-size:15px;letter-spacing:.06em;text-transform:uppercase;color:var(--gold,#d4a12a);margin:18px 0 8px}
+.areas{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px;margin-bottom:14px}
+.areas .card.area{margin:0}.areas h3{margin:0 0 8px}
+table.mini{width:100%;border-collapse:collapse;font-size:13px}
+table.mini th,table.mini td{padding:5px 8px;border-bottom:1px solid rgba(128,128,128,.25);text-align:left}
+table.mini th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;opacity:.75}
+table.mini tr.gh td{padding-top:10px;color:var(--gold,#d4a12a)}
+.areasel{display:block;margin-top:3px;font-size:11px;padding:1px 2px;max-width:100%}
