@@ -339,7 +339,7 @@ function hourBoard() {
     const bg = stops.length ? `style="background:linear-gradient(to right,${stops.join(",")})"` : "";
     return `<div class="hb ${t}${t === "MIX" ? " " + dt : ""}${cur ? " now" : ""}" ${bg} title="${lab(h)}:00–${lab(h + 1)}:00 · ${dn ? `${dt === "BD" ? "breakdown" : "maintenance"} ${hm(dn)} of ${hm(q.len)}` : v === "SB" ? "refuelling" : "operating"}"><i>${lab(h)}</i><b>${lbl2}</b></div>`; };
   return `<section class="hboard"><div class="hbhead"><h2 class="sect" style="margin:0">This shift hour by hour</h2><span class="muted">${sh} shift ${sh === "Day" ? "06:00 – 18:00" : "18:00 – 06:00"} · ${fmt(d)}</span>
-      <span class="hbkey"><span class="hb OP"><b>OP</b></span> Operating <span class="hb SB"><b>RF</b></span> Refuelling <span class="hb BD"><b>BD</b></span> Breakdown <span class="hb PM"><b>PM</b></span> Planned maintenance <span class="hb OFF"><b>OFF</b></span> Not on site</span></div>
+      <span class="hbkey"><span class="hb OP"><b>OP</b></span> Operating <span class="hb BD"><b>BD</b></span> Breakdown <span class="hb PM"><b>PM</b></span> Planned maintenance <span class="hb OFF"><b>OFF</b></span> Not on site</span></div>
     ${fleet().map(([g, L]) => `<div class="hbgrp"><h3>${esc(g)}</h3>${L.map(mc => { const st = stateNow(mc), why = st !== "OP" ? reasonNow(mc) : "";
       return `<div class="hbrow"><div class="hbm"><b>${esc(mc)}</b><small class="${st === "?" ? "OP" : st}">${st === "?" ? "Operational" : st === "OP" ? "Operating" : st === "SB" ? "Refuelling" : st === "OFF" ? "Not on site" : TYPES[st] || st}</small>${why ? `<small class="why">${esc(why)}</small>` : ""}</div><div class="hbcells">${(() => { let prev = ""; return H.map(h => { const c = cell(mc, h, prev); prev = hStart(d, h) <= now ? cellVal(d, mc, h) : ""; return c; }).join(""); })()}</div></div>`; }).join("")}</div>`).join("")}</section>`;
 }
@@ -359,7 +359,7 @@ function checklist(d) {
 function availView() {
   const F = fleet(), d = date, rowsFor = L => L.map(m => [m, daySum(m, d)]);
   const pc = v => v == null ? "–" : Math.round(v * 100) + "%";
-  return pageHead("Machine availability", fmt(d), dow(d), "", "From the logged times: a day runs 06:00 to 06:00. Refuelling counts as available; not in use is left out.")
+  return pageHead("Machine availability", fmt(d), dow(d), "", "From the logged times: a day runs 06:00 to 06:00. Refuelling and standby count as operating; not in use is left out.")
     + `<div class="mhead">${dateBar()}</div>`
     + F.map(([g, L]) => { const rows = rowsFor(L), tot = rows.reduce((a, [, s]) => { if (s) for (const k of ["avail", "BD", "PM", "SB", "NU", "down"]) a[k] = (a[k] || 0) + s[k]; return a; }, {});
       return `<section class="card"><h2>${esc(g)}</h2><div class="tbl"><table class="avt"><thead><tr><th>Machine</th><th>Available h</th><th>Breakdown h</th><th>Planned maint. h</th><th>Refuelling h</th><th>Not in use h</th><th>Availability</th></tr></thead><tbody>
