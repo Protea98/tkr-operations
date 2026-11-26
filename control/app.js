@@ -1610,9 +1610,9 @@ async function seedReports3() {
   await put({ id: KEY, kind: "seed", ym: "setup", at: now, date: today() }, `Rockbreakers 01/11/2026 to 25/11/2026 captured by Admin from the signed fleet reports and the WhatsApp reports (${n} machine days)`, AD);
   undo = keep; await metaSet("undo", undo).catch(() => {}); bump(); render(); }
 /* once: where each rockbreaker worked each shift 01/11 to 25/11/2026 (Rompad or Pit project), from the fleet reports and the WhatsApp reports. Done by Admin. */
-const RB_AREA = {"TKRH011":[["2026-11-01|Day","Rompad"],["2026-11-09|Night","Pit project"],["2026-11-10|Night","Rompad"],["2026-11-11|Night","Pit project"],["2026-11-13|Day","Rompad"]],"TKRH015":[["2026-11-01|Day","Rompad"]],"TKRH017":[["2026-11-01|Day","Pit project"]],"TKRH019":[["2026-11-01|Day","Rompad"],["2026-11-02|Day","Pit project"],["2026-11-11|Night","Rompad"],["2026-11-12|Night","Pit project"],["2026-11-18|Night","Rompad"]],"TKRH020":[["2026-11-01|Day","Rompad"],["2026-11-18|Day","Pit project"],["2026-11-19|Day","Rompad"]],"TKRH021":[["2026-11-01|Day","Rompad"]]};
+const RB_AREA = {"TKRH011":[["2026-11-01|Day","Rompad"]],"TKRH015":[["2026-11-01|Day","Rompad"]],"TKRH017":[["2026-11-01|Day","Pit project"]],"TKRH019":[["2026-11-01|Day","Rompad"],["2026-11-02|Day","Pit project"],["2026-11-11|Night","Rompad"],["2026-11-12|Night","Pit project"],["2026-11-18|Night","Rompad"]],"TKRH020":[["2026-11-01|Day","Rompad"]],"TKRH021":[["2026-11-01|Day","Rompad"]]};
 async function seedAreas() {
-  const KEY = "seed_rb_area_2026-11-26"; if (recs.some(r => r.id === KEY)) return;
+  const KEY = "seed_rb_area_2026-11-26_v2";   // v2: TKRH017 the Pit every shift (fleet reports), TKRH019 in the Pit 02/11 to 18/11; TKRH011 and TKRH020 never if (recs.some(r => r.id === KEY)) return;
   const keep = undo.slice(), have = new Set(fleet().flatMap(([, L]) => L)); let n = 0;
   for (const [mc, CH] of Object.entries(RB_AREA)) { if (!have.has(mc)) continue; let cur = CH[0][1];
     for (let d = "2026-11-01"; d <= "2026-11-25"; d = addDays(d, 1)) { const id = `hr_${d}_${mc}`, old = recs.find(r => r.id === id && !r.deleted), area = { ...(old?.area || {}) }; let ch = false;
