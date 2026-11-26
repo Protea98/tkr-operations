@@ -1044,14 +1044,15 @@ function shiftMessage(d, sh, short = false) {   // simple: every machine, its st
 }
 /* the status picture: the dashboard summed up in one JPEG for WhatsApp (status right now) */
 /* separate pictures (Eddie, 26/11): Drilling, the Cementation bus, the Pit pecker – or everything */
-const PIC_VIEWS = [["all", "All machines"], ["drill", "Drilling"], ["cem", "Cementation bus"], ["pit", "Pit pecker"]];
-const cemBuses = () => byId("views")?.cem || [];
+const PIC_VIEWS = [["drill", "Drilling"], ["cem", "Cementation bus"], ["pit", "Pit pecker"], ["rest", "Rompad and support fleet"]];   // Eddie's categories, each its own picture
+const cemBuses = () => { const v = byId("views")?.cem; return v && v.length ? v : ["TKR026"]; };   // TKR026 is the Cementation bus (Muneer, 26/11)
 function viewFleet(v) { const F = fleet(), { d, sh } = shiftNow();
   if (v === "drill") return F.filter(([g]) => /drill/i.test(g));
   if (v === "pit") return [["Pit pecker", F.flatMap(([g, L]) => /rock/i.test(g) ? L : []).filter(mc => areaOf(d, mc, sh) === "Pit project")]];
   if (v === "cem") return [["Cementation bus", F.flatMap(([, L]) => L).filter(mc => cemBuses().includes(mc))]];
+  if (v === "rest") return F.filter(([g]) => !/drill/i.test(g)).map(([g, L]) => [/rock/i.test(g) ? "Rompad peckers" : g, L.filter(mc => !cemBuses().includes(mc) && !(/rock/i.test(g) && areaOf(d, mc, sh) === "Pit project"))]).filter(([, L]) => L.length);
   return F; }
-async function statusPicture(view = "all") {
+async function statusPicture(view = "drill") {
   const F = viewFleet(view), ALL = F.flatMap(([, L]) => L).filter(m => !offNow(m)), { d: sd, sh: ssh } = shiftNow(), shT = fleetSum(ALL, m => shiftSum(m, sd, ssh));
   const st = m => { const x = stateNow(m); return x === "?" ? "OP" : x; }, cnt = k => ALL.filter(m => st(m) === k).length, now = Date.now();
   const COL = { OP: "#2f8a55", SB: "#c79a2e", BD: "#c0392b", PM: "#2f6fb5", NU: "#777", OFF: "#555" }, LBL = { OP: "Operational", SB: "Refuelling", BD: "Breakdown", PM: "Maintenance", NU: "Not in use", OFF: "Not on site" };
@@ -1070,7 +1071,7 @@ async function statusPicture(view = "all") {
   const box = (X, Y, w, h, r, f, s) => { x.beginPath(); x.roundRect(X + .5, Y + .5, w - 1, h - 1, r); if (f) { x.fillStyle = f; x.fill(); } if (s) { x.strokeStyle = s; x.lineWidth = 1; x.stroke(); } };
   x.fillStyle = T.bg; x.fillRect(0, 0, W, H);
   try { const img = new Image(); img.src = "../icons/logo-96.png"; await img.decode(); x.save(); x.beginPath(); x.arc(P + 26, 44, 26, 0, 7); x.clip(); x.drawImage(img, P, 18, 52, 52); x.restore(); } catch {}
-  font(700, 26); x.fillStyle = T.fg; x.fillText(view === "all" ? "Control Room – machine status" : `Control Room – ${PIC_VIEWS.find(q => q[0] === view)[1]}`, P + 66, 40);
+  font(700, 26); x.fillStyle = T.fg; x.fillText(`Control Room – ${(PIC_VIEWS.find(q => q[0] === view) || [, "machine status"])[1]}`, P + 66, 40);
   font(500, 15); x.fillStyle = T.muted; x.fillText(`TKR Operations · Tharisa · ${dow(sd)} ${fmt(sd)} · ${ssh} shift · ${tOf(now)}`, P + 66, 64);
   x.fillStyle = T.line; x.fillRect(P, 86, W - P * 2, 1);
   const MA = ALL.map(m => mtdSum(m)).reduce((a2, q) => ({ avail: a2.avail + q.avail, down: a2.down + q.down }), { avail: 0, down: 0 }), tiles = [["AVAILABLE", pcOf(shT), "this shift", T.ok], ["MONTH TO DATE", pcOf(MA), "since 01/" + today().slice(5, 7), T.ok], ["WORKING", `${cnt("OP") + cnt("SB")}/${ALL.length}`, cnt("SB") ? `${cnt("SB")} refuelling` : "machines", T.fg], ["BREAKDOWN", String(cnt("BD")), "now", cnt("BD") ? T.bad : T.fg], ["MAINTENANCE", String(cnt("PM")), "now", T.fg]];
@@ -1118,10 +1119,10 @@ async function statusPicture(view = "all") {
   x2.fillStyle = "#2d3431"; x2.fillRect(P, H2 - 54, W - P * 2, 1); x2.font = `400 14px "Inter","Segoe UI",Arial,sans-serif`; x2.fillStyle = "#a2a8a1"; x2.fillText("Live dashboard: protea98.github.io/tkr-operations/control", P, H2 - 20);
   const nm = `${me?.name || ""}`; if (nm) { const t2 = "Controller: " + nm; x2.fillText(t2, W - P - x2.measureText(t2).width, H2 - 20); }
   return c2; }
-async function showPicture(text, view = "all") {
+async function showPicture(text, view = "drill") {
   document.querySelector(".ccdone")?.remove(); const d = document.createElement("div"); d.className = "ccdone"; d.setAttribute("role", "dialog");
   const tabsP = `<div class="row" style="gap:6px;margin:0 0 10px;flex-wrap:wrap">${PIC_VIEWS.map(([k, l]) => `<button class="sm${k === view ? " primary" : ""}" data-pv="${k}">${l}</button>`).join("")}</div>`;
-  if (view === "cem" && !cemBuses().length) { const B = fleet().flatMap(([g, L]) => /bus/i.test(g) ? L : []);   // which bus works for Cementation: picked once, kept for everyone
+  if (view === "cem" && !cemBuses().length && false) { const B = fleet().flatMap(([g, L]) => /bus/i.test(g) ? L : []);   // which bus works for Cementation: picked once, kept for everyone
     d.innerHTML = `<div style="max-width:620px;width:100%"><div class="big">Cementation bus</div>${tabsP}<p>Tick the bus (or buses) that work for Cementation. This is saved for every PC.</p><div class="row" style="gap:10px;flex-wrap:wrap">${B.map(m => `<label style="display:flex;gap:6px;align-items:center"><input type="checkbox" value="${esc(m)}"> ${esc(m)}</label>`).join("")}</div>
       <div class="row" style="margin-top:12px;gap:6px"><button class="primary" data-pcem="1" style="flex:1">Save and show the picture</button><button class="ghost" data-p="x" style="flex:1">Close</button></div></div>`;
     d.onclick = async e => { const b = e.target.closest("button"); if (!b) { if (e.target === d) d.remove(); return; } if (b.dataset.pv) { showPicture(text, b.dataset.pv); return; } if (b.dataset.p === "x") { d.remove(); return; }
@@ -1129,8 +1130,8 @@ async function showPicture(text, view = "all") {
         try { await put({ ...(byId("views") || { id: "views", kind: "views", ym: "setup" }), cem }, `Cementation bus set: ${cem.join(", ")}`); } catch { toast("Only the controller on duty or an admin can set this."); return; } showPicture(text, "cem"); } };
     document.body.appendChild(d); return; }
   const c = await statusPicture(view), url = c.toDataURL("image/jpeg", 0.9);
-  const name = `TKR_${view === "all" ? "Control_Room" : PIC_VIEWS.find(q => q[0] === view)[1].replace(/\s+/g, "_")}_${today()}_${tOf(Date.now()).replace(":", "")}.jpg`;
-  d.innerHTML = `<div style="max-width:620px;width:100%"><div class="big">Status picture</div>${tabsP}${view === "cem" ? `<p class="muted" style="margin:0 0 8px">Cementation bus: ${cemBuses().map(esc).join(", ")} · <button class="sm ghost" data-pcemreset="1">Change</button></p>` : ""}<img src="${url}" alt="Machine status picture" style="width:100%;border-radius:10px;border:1px solid #333;max-height:60vh;object-fit:contain;background:#121413">
+  const name = `TKR_${(PIC_VIEWS.find(q => q[0] === view) || [, "Control Room"])[1].replace(/\s+/g, "_")}_${today()}_${tOf(Date.now()).replace(":", "")}.jpg`;
+  d.innerHTML = `<div style="max-width:620px;width:100%"><div class="big">Status picture</div>${tabsP}${view === "cem" ? `<p class="muted" style="margin:0 0 8px">Cementation bus: ${cemBuses().map(esc).join(", ")}</p>` : ""}<img src="${url}" alt="Machine status picture" style="width:100%;border-radius:10px;border:1px solid #333;max-height:60vh;object-fit:contain;background:#121413">
     <div class="row" style="margin-top:10px;gap:6px"><button class="primary" data-p="share" style="flex:1">Send to WhatsApp</button><button data-p="dl" style="flex:1">Download picture</button><button data-p="text" style="flex:1">Copy message text</button><button class="ghost" data-p="x" style="flex:1">Close</button></div></div>`;
   d.onclick = async e => { const b = e.target.closest("button"); if (!b) { if (e.target === d) d.remove(); return; } if (b.dataset.pv) { showPicture(text, b.dataset.pv); return; }
     if (b.dataset.pcemreset) { try { await put({ ...(byId("views") || { id: "views", kind: "views", ym: "setup" }), cem: [] }); } catch { toast("Only the controller on duty or an admin can change this."); return; } showPicture(text, "cem"); return; }
