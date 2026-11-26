@@ -676,7 +676,7 @@ async function retypeBoxes(mc, from, to, oldT, newT) { if (!oldT || oldT === new
   for (let t = from - (from % 36e5 + 864e5) % 36e5; t < end; t += 36e5) { const dt = new Date(t), hh = dt.getHours(), d0 = ymd(dt), dd = hh < 6 ? addDays(d0, -1) : d0, h = hh < 6 ? hh + 24 : hh;
     const r = recs.find(x => x.id === `hr_${dd}_${mc}` && !x.deleted); if (r?.cells?.[h] === oldT) await put({ ...r, cells: { ...r.cells, [h]: newT } }); } }
 async function retypeEvent(e, val) { await put({ ...e, type: val }, `${e.machine}: ${TYPES[e.type].toLowerCase()} from ${hhmm(e.start)} changed to ${TYPES[val].toLowerCase()}`); await retypeBoxes(e.machine, toMs(e.start), e.end ? toMs(e.end) : 0, e.type, val); toast(`${e.machine}: changed to ${TYPES[val].toLowerCase()} from ${hhmm(e.start)}.`); }
-async function setCell(d, mc, h, val) {
+async function setCell(d, mc, h, val, opt = {}) {
   if (val && hStart(d, h) > Date.now()) { toast("That hour hasn't started yet. Fill it in when it starts."); return; }   // no boxes filled ahead of time
   const id = `hr_${d}_${mc}`, rec = recs.find(r => r.id === id) || { id, kind: "hr", ym: d.slice(0, 7), date: d, machine: mc, cells: {} };
   const a = hStart(d, h), b = a + 36e5, now = Date.now(), current = now >= a && now < b, cells = { ...rec.cells }; if (val) cells[h] = val; else if (a > now) delete cells[h]; else cells[h] = "-";   // a box ahead of time cleared: as if never touched
@@ -694,16 +694,20 @@ async function setCell(d, mc, h, val) {
   const open = downEvs(mc).filter(e => !e.end && toMs(e.start) <= now).sort((x, y) => toMs(y.start) - toMs(x.start))[0];
   if (val === "BD" || val === "PM") {
     if (current) { if (open && open.type === val) return;
-      if (open && (open.type === "BD" || open.type === "PM") && toMs(open.start) >= a) { await retypeEvent(open, val); return; }   // picked the wrong one in this hour: it becomes the other, from the same start time
+      if (open && (open.type === "BD" || open.type === "PM") && open.type !== opt.prev && toMs(open.start) >= a) { await retypeEvent(open, val); return; }   // picked the wrong one in this hour: it becomes the other, from the same start time
       const prevH = prevHour(d, h), cont = downEvs(mc).filter(e => e.type === val && e.end && Math.abs(toMs(e.end) - a) <= 3e4).sort((x, y) => toMs(y.start) - toMs(x.start))[0];   // it was already down at the end of the last hour: it carries on from there, not from now
       if (cont && !open) { await put({ ...cont, end: "", endBy: "" }, `${mc}: ${TYPES[val].toLowerCase()} still going from ${hhmm(cont.start)}`); toast(`${mc}: still on ${TYPES[val].toLowerCase()} from ${hhmm(cont.start)}.`); return; }
       if (!open && cellsOf(prevH[0], mc)[prevH[1]] === val) { await put({ id: "ev_" + uid(), kind: "ev", ym: d.slice(0, 7), machine: mc, group: groupOf(mc), type: val, start: isoOf(a), end: "", reason: "" }, `${mc}: ${TYPES[val]} from ${tOf(a)}`); toast(`${mc}: still on ${TYPES[val].toLowerCase()} from ${tOf(a)}.`); return; }
-      if (open) await put({ ...open, end: nowLocal(), endBy: me.name });
+      if (open) await put({ ...open, grid: 0, end: nowLocal(), endBy: me.name });
       await put({ id: "ev_" + uid(), kind: "ev", ym: d.slice(0, 7), machine: mc, group: groupOf(mc), type: val, start: nowLocal(), end: "", reason: "" }, `${mc}: ${TYPES[val]} from ${hhmm(nowLocal())}`);
       toast(`${mc}: ${TYPES[val].toLowerCase()} logged at ${hhmm(nowLocal())}.`);
       return; }
     const other = downEvs(mc).find(e => !e.grid && (e.type === "BD" || e.type === "PM") && e.type !== val && toMs(e.start) < b && evEnd(e) > a);
-    if (other) { await retypeEvent(other, val); return; }   // the hour is inside a breakdown with typed times: that breakdown becomes planned maintenance (or the other way round)
+    if (other && other.type === opt.prev) {   // it was on breakdown before the maintenance: the breakdown stops at this hour, the maintenance starts here
+      const s0 = toMs(other.start), e0 = evEnd(other);
+      if (s0 < a) await put({ ...other, end: isoOf(a), endBy: me.name }, `${mc}: ${TYPES[other.type].toLowerCase()} from ${hhmm(other.start)} until ${tOf(a)}, then ${TYPES[val].toLowerCase()}`); else await put({ ...other, deleted: true });
+      if (e0 > b) await put({ ...other, id: "ev_" + uid(), start: isoOf(b), end: other.end || "" }); }
+    else if (other) { await retypeEvent(other, val); return; }   // the hour is inside a breakdown with typed times: that breakdown becomes planned maintenance (or the other way round)
     const E = downEvs(mc).filter(e => e.type === val);
     if (E.some(e => toMs(e.start) < b && evEnd(e) > a)) return;                                   // that hour is already inside a logged time
     const before = E.find(e => e.end && toMs(e.end) === a), after = E.find(e => toMs(e.start) === b);
@@ -1240,6 +1244,18 @@ document.addEventListener("click", async ev => {
     const iso = t => new Date(t - new Date(t).getTimezoneOffset() * 6e4).toISOString().slice(0, 16);
     openEv(evForm({ machine: mc, type: ["BD", "PM", "SB"].includes(cur) ? cur : "PM", start: iso(a), end: iso(Math.min(a + 36e5, Date.now())) }, "").replace('<input type="hidden" name="eid" value="">', `<input type="hidden" name="eid" value=""><input type="hidden" name="hourcell" value="${d}|${mc}|${h}">`), `${mc} · ${hLabel(h)} – part of the hour`);
     toast("Change Started and Ended to the real times. The rest of the hour stays working (green)."); return; }
+  const pg = ev.target.closest("[data-pmgo]");
+  if (pk && pop && pk.dataset.hpick === "PM" && pop.dataset.cur !== "PM") {   // planned maintenance: say what the machine was doing before it
+    const [mc, h0] = pop.dataset.cell.split("|"), d = $("fDay").dataset.date, a = hStart(d, +h0), pv = prevHour(d, +h0), pc = cellVal(pv[0], mc, pv[1]);
+    const def = downEvs(mc).some(e => e.type === "BD" && toMs(e.start) < a && evEnd(e) >= a - 6e4) || pc === "BD" ? "BD" : pc === "SB" ? "SB" : "OP";
+    pop.innerHTML = `<b style="display:block;margin:2px 2px 6px">Planned maintenance</b><label style="display:block;font-size:12px">Previous status<select id="pmPrev" style="display:block;width:100%;margin-top:4px">${[["OP", "Operating"], ["BD", "Breakdown"], ["SB", "Refuelling"]].map(([k, t]) => `<option value="${k}" ${k === def ? "selected" : ""}>${t}</option>`).join("")}</select></label>
+      <button type="button" class="ty PM" data-pmgo style="margin-top:8px">Save planned maintenance</button><small>Breakdown: the breakdown stops where the maintenance starts. Operating or refuelling: a breakdown logged over this hour becomes the maintenance.</small>`; return; }
+  if (pg && pop) { const [mc, h] = pop.dataset.cell.split("|"), prev = $("pmPrev").value, d = $("fDay").dataset.date, a = hStart(d, +h); pop.remove();
+    await setCell(d, mc, +h, "PM", { prev }); const pv = prevHour(d, +h), pr = recs.find(r => r.id === `hr_${pv[0]}_${mc}` && !r.deleted);
+    if (prev === "SB" && hStart(pv[0], pv[1]) >= shiftWin(d, +h < 18 ? "Day" : "Night")[0] && !(pr?.cells?.[pv[1]])) await setCell(pv[0], mc, pv[1], "SB");   // the hour before shows refuelling when nothing was filled in
+    await joinRuns(); render();
+    if (a + 36e5 <= Date.now()) { const e = downEvs(mc).find(x => x.type === "PM" && x.grid && !x.deleted && toMs(x.start) < a + 36e5 && evEnd(x) > a); if (e) { openEv(evForm(e), `${mc} · planned maintenance – type the times`); toast("Type when the maintenance started and ended. The rest of the hour stays green."); } }
+    return; }
   if (pk && pop) { const [mc, h] = pop.dataset.cell.split("|"), cur = pop.dataset.cur || "", val = pk.dataset.hpick === cur ? "" : pk.dataset.hpick; pop.remove();
     if (val === cur && pk.dataset.hpick !== "") return; const d = $("fDay").dataset.date, a = hStart(d, +h); await setCell(d, mc, +h, val); await joinRuns(); if (!val) toast(`${mc} ${hLabel(+h)} cleared.`); render();
     if ((val === "BD" || val === "PM") && a + 36e5 <= Date.now()) {   // an hour already gone: ask the real times straight away so the box shows green / blue or red / green
