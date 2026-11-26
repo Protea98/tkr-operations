@@ -668,7 +668,7 @@ function areaCards() { const ym = today().slice(0, 7), M = areaMonth(ym), { d, s
       <p class="muted" style="margin:6px 0">${sh} shift now: ${now.length ? now.map(esc).join(", ") : "-"}</p>
       <table class="mini"><thead><tr><th>Machine</th><th>Shifts</th><th>Machine hrs</th><th>Availability</th></tr></thead><tbody>${per.map(([mc, p]) => `<tr><td>${esc(mc)}</td><td>${p.shifts}</td><td>${hm(p.hrs)}</td><td>${pcOf(p)}</td></tr>`).join("") || `<tr><td colspan="4">-</td></tr>`}</tbody></table></section>`; }).join("")}</div>`; }
 function mtdCard() { const ym = today().slice(0, 7), F = fleet();
-  return `<p class="muted" style="margin-top:0">Availability month to date = available hours ÷ (available + breakdown + maintenance hours), from the 1st at 06:00 up to now. Available is every OP hour (working, refuelling, standby). Breakdown (BD) and planned maintenance (PM) are the down hours. Empty boxes and hours not on site are left out. A group's figure adds its machines' hours together.</p><table class="mini"><thead><tr><th>Machine</th><th>Available</th><th>Breakdown</th><th>Maintenance</th><th>Availability</th><th>Machine hrs</th></tr></thead><tbody>${F.map(([g, L]) => { const G = L.map(mc => mtdSum(mc, ym)), T0 = G.reduce((a, x) => ({ avail: a.avail + x.avail, down: a.down + x.down }), { avail: 0, down: 0 });
+  return `<p><button class="primary" data-mtdxl="">Download availability and breakdown report (Excel, ${monthName(ym)} to date)</button></p><p class="muted" style="margin-top:0">Availability month to date = available hours ÷ (available + breakdown + maintenance hours), from the 1st at 06:00 up to now. Available is every OP hour (working, refuelling, standby). Breakdown (BD) and planned maintenance (PM) are the down hours. Empty boxes and hours not on site are left out. A group's figure adds its machines' hours together.</p><table class="mini"><thead><tr><th>Machine</th><th>Available</th><th>Breakdown</th><th>Maintenance</th><th>Availability</th><th>Machine hrs</th></tr></thead><tbody>${F.map(([g, L]) => { const G = L.map(mc => mtdSum(mc, ym)), T0 = G.reduce((a, x) => ({ avail: a.avail + x.avail, down: a.down + x.down }), { avail: 0, down: 0 });
     return `<tr class="gh"><td colspan="4"><b>${esc(g)}</b></td><td><b>${pcOf(T0)}</b></td><td></td></tr>` + L.map((mc, i) => { const x = G[i], mh = machHrsIn(ym, mc); return `<tr><td>${esc(mc)}</td><td>${hm(x.avail)}</td><td>${hm(x.BD)}</td><td>${hm(x.PM)}</td><td><b>${pcOf(x)}</b></td><td>${mh == null ? "-" : hm(mh)}</td></tr>`; }).join(""); }).join("")}</tbody></table>`; }
 function svcCard() { const F = fleet(), P = pmRec()?.at || {};
   return `<p class="muted" style="margin-top:0">Next service = last service logged + service interval. Hours left = next service minus the latest hour meter. Rockbreakers turn red at 50 hours left and go into minus until the service is logged on the day sheet (Last service). A hyphen means the last service or interval is not known yet.</p><table class="mini"><thead><tr><th>Machine</th><th>Last service</th><th>Interval</th><th>Next service at</th><th>Latest hour meter</th><th>Hours left</th></tr></thead><tbody>${F.map(([g, L]) => `<tr class="gh"><td colspan="6"><b>${esc(g)}</b></td></tr>` + L.map(mc => { const lm = lastMeter(mc, today()), at = dueAt(mc), v = toNextPM(mc), ls = lastSvc(mc), fl = svcFlag(mc);
@@ -1490,6 +1490,7 @@ async function clickH(ev) {
   if (b.dataset.site) { const [m, k] = b.dataset.site.split("|"), f = document.querySelector("#fSite [name=from]"), ms = toMs(f?.value) || Date.now();
     if (ms > Date.now()) { toast("Pick a time that has passed."); return; } await setSite(m, k === "off", ms); const gi = fleet().findIndex(([, L]) => L.includes(m)); openEv(siteForm(gi), "On site / not on site"); render(); toast(`${m} ${k === "off" ? "marked not on site" : "back on site"}.`); return; }
   if (b.dataset.rmmg) { openEv(machForm(+b.dataset.rmmg, "rm"), "Remove a machine"); return; }
+  if (b.dataset.mtdxl !== undefined) { toast("Making the report…"); try { await exportBdReport(today().slice(0, 8) + "01", today()); } catch (e) { console.warn(e); toast("The report couldn't be made."); } return; }
   if (b.dataset.svclog) { openEv(svcForm(b.dataset.svclog), `${b.dataset.svclog} · last service`); return; }
   if (b.dataset.precap !== undefined) { openEv(preForm(b.dataset.precap, b.dataset.preid), "Pre-use checklist"); return; }
   if (b.dataset.preday) { const { d: d0, sh: s0 } = shiftNow(); let d = preDay || d0, sh = preSh || s0; if (+b.dataset.preday < 0) { if (sh === "Night") sh = "Day"; else { sh = "Night"; d = addDays(d, -1); } } else { if (sh === "Day") sh = "Night"; else { sh = "Day"; d = addDays(d, 1); } } preDay = d; preSh = sh; render(); return; }
@@ -2038,6 +2039,47 @@ async function exportBdReport(from, to) {
   for (const l of lines.sort((a, b) => a.d.localeCompare(b.d) || (a.sh === "Day" ? -1 : 1) - (b.sh === "Day" ? -1 : 1) || M.findIndex(x => x.mc === a.mc) - M.findIndex(x => x.mc === b.mc)))
     r = row(ws, r, [fmt(l.d), l.sh, l.mc, l.type, l.when, l.BD, l.PM, l.down, l.why, l.action, l.owner, l.eta], { k: k++, left: [0, 2, 3, 4, 8, 9, 10], h: Math.max(18, Math.ceil(Math.max(l.why.length / 40, l.action.length / 26, l.when.length / 22)) * 13 + 6) });
   if (!lines.length) r = row(ws, r, ["No breakdowns or maintenance captured for these dates.", ...Array(11).fill("")], { left: [0] });
+  const wsOpt = { views: [{ showGridLines: false }], pageSetup: { orientation: "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: 0, paperSize: 9 } }, dd = d => days.length > 1 ? fmt(d).slice(0, 5) + " " : "";
+  // sheet 3: breakdown of the breakdowns – every reason group, with each breakdown under it
+  { const BL = lines.filter(l => l.BD > 0), G = new Map(); for (const l of BL) { const c = reasonGroup(l.why), x = G.get(c) || { BD: 0, L: [], mc: new Map() }; x.BD += l.BD; x.L.push(l); x.mc.set(l.mc, (x.mc.get(l.mc) || 0) + l.BD); G.set(c, x); }
+    const GS = [...G].sort((a, b) => b[1].BD - a[1].BD);
+    ws = wb.addWorksheet("Breakdown analysis", wsOpt); ws.columns = [20, 8, 22, 26, 14, 50].map(w => ({ width: w }));
+    top(ws, 6, `BREAKDOWN ANALYSIS – ${period}`, "Every breakdown under its reason group, largest first"); r = 7;
+    if (!GS.length) r = row(ws, r, ["No breakdowns captured for these dates.", "", "", "", "", ""], { left: [0] });
+    else { r = band(ws, r, 6, "Summary"); r = head(ws, r, ["Reason group", "", "Breakdowns", "Machines", "Breakdown (h:mm)", "Share of breakdown time"]); k = 0;
+      for (const [c, x] of GS) { r = row(ws, r, [c, "", x.L.length, [...x.mc.keys()].join(", "), x.BD, allBD ? x.BD / allBD : "–"], { k: k++, int: [2], pct: [5], left: [0, 3] }); ws.mergeCells(r - 1, 1, r - 1, 2); }
+      r++; ws.addImage(wb.addImage({ base64: pie("Breakdown hours by reason", GS.map(([c, x]) => [c, x.BD])), extension: "png" }), { tl: { col: 0, row: r }, ext: { width: 620, height: 405 } }); r += 22;
+      for (const [c, x] of GS) { r = band(ws, r, 6, `${c} – ${hmT(x.BD)} h, ${allBD ? Math.round(x.BD / allBD * 100) : 0}% of breakdown time, ${x.L.length} breakdown${x.L.length === 1 ? "" : "s"}`);
+        r = head(ws, r, ["Date", "Shift", "Machine", "From – to", "Breakdown (h:mm)", "Reason (as written)"]); k = 0;
+        for (const l of x.L.sort((p, q) => p.d.localeCompare(q.d) || (p.sh === "Day" ? -1 : 1))) r = row(ws, r, [fmt(l.d), l.sh, l.mc, l.when, l.BD, l.why], { k: k++, left: [0, 2, 3, 5], h: Math.max(18, Math.ceil(l.why.length / 50) * 13 + 6) });
+        if (x.mc.size > 1) { r = row(ws, r, ["By machine: " + [...x.mc].sort((p, q) => q[1] - p[1]).map(([m, v]) => `${m} ${hmT(v)} h`).join(" · "), "", "", "", "", ""], { left: [0], fill: "FFFFF2CC" }); ws.mergeCells(r - 1, 1, r - 1, 6); }
+        r++; } } }
+  // sheet 4: Rompad and Pit project (rockbreakers, work area per shift)
+  { const RB = fleet().flatMap(([g, L]) => /rock/i.test(g) ? L : []); if (RB.length) { const A = Object.fromEntries(AREAS.map(a => [a, {}]));
+      for (const d of days) for (const sh of ["Day", "Night"]) { if (shiftWin(d, sh)[0] > now) continue; for (const mc of RB) { if (offShift(mc, d, sh)) continue; const x = shiftSum(mc, d, sh), hh = shiftMachHrs(d, mc, sh); if (!x.filled && !x.down && !hh) continue;
+          const P = A[areaOf(d, mc, sh)] || A.Rompad, q = P[mc] = P[mc] || { n: 0, hrs: 0, avail: 0, BD: 0, PM: 0, down: 0 }; q.n++; q.hrs += hh; q.avail += x.avail; q.BD += x.BD; q.PM += x.PM; q.down += x.down; } }
+      ws = wb.addWorksheet("Rompad and Pit project", wsOpt); ws.columns = [16, 10, 16, 16, 16, 16, 14].map(w => ({ width: w }));
+      top(ws, 7, `ROMPAD AND PIT PROJECT – ${period}`, "Rockbreakers by work area, shift by shift"); r = 7;
+      for (const a of AREAS) { const E = Object.entries(A[a]).sort((p, q) => q[1].hrs - p[1].hrs); r = band(ws, r, 7, a); r = head(ws, r, ["Machine", "Shifts", "Machine hours (h:mm)", "Available (h:mm)", "Breakdown (h:mm)", "Planned maint. (h:mm)", "Availability"]); k = 0;
+        const T = { n: 0, hrs: 0, avail: 0, BD: 0, PM: 0, down: 0 }; for (const [mc, q] of E) { for (const z in T) T[z] += q[z]; r = row(ws, r, [mc, q.n, q.hrs, q.avail, q.BD, q.PM, q.avail + q.down ? q.avail / (q.avail + q.down) : "–"], { k: k++, int: [1], pct: [6] }); }
+        r = row(ws, r, [a + " total", T.n, T.hrs, T.avail, T.BD, T.PM, T.avail + T.down ? T.avail / (T.avail + T.down) : "–"], { bold: true, fill: "FFFFF2CC", int: [1], pct: [6] }); r++; } } }
+  // sheet 5: daily availability per machine
+  if (days.length > 1) { ws = wb.addWorksheet("Daily availability", wsOpt); ws.columns = [14, 12, ...days.map(() => 7)].map(w => ({ width: w })); top(ws, days.length + 2, `DAILY AVAILABILITY – ${period}`, "Each day 06:00 to 06:00"); r = 7;
+    r = head(ws, r, ["Group", "Machine", ...days.map(d => fmt(d).slice(0, 5))]); k = 0;
+    for (const [g, L] of fleet()) L.forEach((mc, i) => { const V = days.map(d => { const x = daySum(mc, d); return x && x.total ? x.avail / x.total : ""; }); r = row(ws, r, [i ? "" : g, mc, ...V], { k: k++, pct: days.map((_, j) => j + 2) });
+      V.forEach((v, j) => { if (v !== "") ws.getCell(r - 1, j + 3).fill = fill(v >= .9 ? "FFC6EFCE" : v >= .7 ? "FFFFEB9C" : "FFFFC7CE"); }); }); }
+  // one sheet per machine: hours pie, breakdown reasons, day by day, every stop
+  for (const { g, mc } of M) { const P = per[mc], tot = P.avail + P.down; if (!tot) continue; const nm = mc.slice(0, 30);
+    ws = wb.addWorksheet(nm, wsOpt); ws.columns = [12, 8, 14, 14, 14, 14, 44].map(w => ({ width: w })); top(ws, 7, `${mc} – ${g} · ${period}`, "Availability, breakdowns and every stop"); r = 7;
+    r = head(ws, r, ["Available (h:mm)", "", "Breakdown (h:mm)", "Planned maint. (h:mm)", "Down (h:mm)", "Availability", "Next service"]); r = row(ws, r, [P.avail, "", P.BD, P.PM, P.down, P.avail / tot, pmText(mc, to)], { bold: true, pct: [5] }); r++;
+    const G2 = new Map(); for (const l of lines.filter(l => l.mc === mc && l.BD > 0)) { const c = reasonGroup(l.why); G2.set(c, (G2.get(c) || 0) + l.BD); }
+    ws.addImage(wb.addImage({ base64: pie(`${mc} – where the hours went`, [["Available", P.avail], ["Breakdown", P.BD], ["Planned maintenance", P.PM]].filter(q => q[1] > 0)), extension: "png" }), { tl: { col: 0, row: r }, ext: { width: 440, height: 288 } });
+    if (G2.size) ws.addImage(wb.addImage({ base64: pie(`${mc} – breakdown reasons`, [...G2].sort((a, b) => b[1] - a[1])), extension: "png" }), { tl: { col: 4, row: r }, ext: { width: 440, height: 288 } }); r += 16;
+    if (days.length > 1) { r = band(ws, r, 7, "Day by day"); r = head(ws, r, ["Date", "", "Available (h:mm)", "Breakdown (h:mm)", "Planned maint. (h:mm)", "Availability", "Reasons that day"]); k = 0;
+      for (const d of days) { const x = daySum(mc, d); if (!x || !x.total) continue; const W = [...new Set(lines.filter(l => l.mc === mc && l.d === d).map(l => l.why))].join("; ");
+        r = row(ws, r, [fmt(d), "", x.avail, x.BD, x.PM, x.avail / x.total, W], { k: k++, pct: [5], left: [0, 6], red: [3], h: Math.max(18, Math.ceil(W.length / 44) * 13 + 6) }); } r++; }
+    const ML = lines.filter(l => l.mc === mc); if (ML.length) { r = band(ws, r, 7, "Every stop"); r = head(ws, r, ["Date", "Shift", "Type", "From – to", "Breakdown (h:mm)", "Planned maint. (h:mm)", "Reason"]); k = 0;
+      for (const l of ML) r = row(ws, r, [fmt(l.d), l.sh, l.type, l.when, l.BD, l.PM, l.why], { k: k++, left: [0, 2, 3, 6], h: Math.max(18, Math.ceil(l.why.length / 44) * 13 + 6) }); } }
   const buf = await wb.xlsx.writeBuffer(), name = `TKR Availability and breakdown report ${from === to ? from : from + " to " + to}.xlsx`;
   const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" })); a.download = name; document.body.appendChild(a); a.click(); a.remove(); toast("Downloaded " + name);
 }
