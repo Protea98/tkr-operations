@@ -671,6 +671,11 @@ async function clearRest(d, mc, h) {
     if (s0 >= a && e0 <= b) await put({ ...e, deleted: true }); else if (s0 >= a) await put({ ...e, start: isoOf(b) }); else if (e0 <= b) await put({ ...e, end: isoOf(a) });
     else { await put({ ...e, end: isoOf(a) }); await put({ ...e, id: "ev_" + uid(), start: isoOf(b) }); } }
   bump(); }
+/* a breakdown that was really planned maintenance (or the other way round): the logged time and its hour boxes change together */
+async function retypeBoxes(mc, from, to, oldT, newT) { if (!oldT || oldT === newT) return; const end = Math.min(to || Date.now(), Date.now());
+  for (let t = from - (from % 36e5 + 864e5) % 36e5; t < end; t += 36e5) { const dt = new Date(t), hh = dt.getHours(), d0 = ymd(dt), dd = hh < 6 ? addDays(d0, -1) : d0, h = hh < 6 ? hh + 24 : hh;
+    const r = recs.find(x => x.id === `hr_${dd}_${mc}` && !x.deleted); if (r?.cells?.[h] === oldT) await put({ ...r, cells: { ...r.cells, [h]: newT } }); } }
+async function retypeEvent(e, val) { await put({ ...e, type: val }, `${e.machine}: ${TYPES[e.type].toLowerCase()} from ${hhmm(e.start)} changed to ${TYPES[val].toLowerCase()}`); await retypeBoxes(e.machine, toMs(e.start), e.end ? toMs(e.end) : 0, e.type, val); toast(`${e.machine}: changed to ${TYPES[val].toLowerCase()} from ${hhmm(e.start)}.`); }
 async function setCell(d, mc, h, val) {
   if (val && hStart(d, h) > Date.now()) { toast("That hour hasn't started yet. Fill it in when it starts."); return; }   // no boxes filled ahead of time
   const id = `hr_${d}_${mc}`, rec = recs.find(r => r.id === id) || { id, kind: "hr", ym: d.slice(0, 7), date: d, machine: mc, cells: {} };
@@ -689,6 +694,7 @@ async function setCell(d, mc, h, val) {
   const open = downEvs(mc).filter(e => !e.end && toMs(e.start) <= now).sort((x, y) => toMs(y.start) - toMs(x.start))[0];
   if (val === "BD" || val === "PM") {
     if (current) { if (open && open.type === val) return;
+      if (open && (open.type === "BD" || open.type === "PM") && toMs(open.start) >= a) { await retypeEvent(open, val); return; }   // picked the wrong one in this hour: it becomes the other, from the same start time
       const prevH = prevHour(d, h), cont = downEvs(mc).filter(e => e.type === val && e.end && Math.abs(toMs(e.end) - a) <= 3e4).sort((x, y) => toMs(y.start) - toMs(x.start))[0];   // it was already down at the end of the last hour: it carries on from there, not from now
       if (cont && !open) { await put({ ...cont, end: "", endBy: "" }, `${mc}: ${TYPES[val].toLowerCase()} still going from ${hhmm(cont.start)}`); toast(`${mc}: still on ${TYPES[val].toLowerCase()} from ${hhmm(cont.start)}.`); return; }
       if (!open && cellsOf(prevH[0], mc)[prevH[1]] === val) { await put({ id: "ev_" + uid(), kind: "ev", ym: d.slice(0, 7), machine: mc, group: groupOf(mc), type: val, start: isoOf(a), end: "", reason: "" }, `${mc}: ${TYPES[val]} from ${tOf(a)}`); toast(`${mc}: still on ${TYPES[val].toLowerCase()} from ${tOf(a)}.`); return; }
@@ -696,6 +702,8 @@ async function setCell(d, mc, h, val) {
       await put({ id: "ev_" + uid(), kind: "ev", ym: d.slice(0, 7), machine: mc, group: groupOf(mc), type: val, start: nowLocal(), end: "", reason: "" }, `${mc}: ${TYPES[val]} from ${hhmm(nowLocal())}`);
       toast(`${mc}: ${TYPES[val].toLowerCase()} logged at ${hhmm(nowLocal())}.`);
       return; }
+    const other = downEvs(mc).find(e => !e.grid && (e.type === "BD" || e.type === "PM") && e.type !== val && toMs(e.start) < b && evEnd(e) > a);
+    if (other) { await retypeEvent(other, val); return; }   // the hour is inside a breakdown with typed times: that breakdown becomes planned maintenance (or the other way round)
     const E = downEvs(mc).filter(e => e.type === val);
     if (E.some(e => toMs(e.start) < b && evEnd(e) > a)) return;                                   // that hour is already inside a logged time
     const before = E.find(e => e.end && toMs(e.end) === a), after = E.find(e => toMs(e.start) === b);
@@ -1392,6 +1400,7 @@ async function submitH(ev) {
         await addReq({ target: { type: "ev", id: old.id }, what: evTxt(old), fromTxt: evTxt(old), toTxt: evTxt(prop), to: prop, why }); return; } }
     const rec = { ...(old || {}), grid: 0, id: old?.id || "ev_" + uid(), kind: "ev", ym: s.slice(0, 7), machine: v("machine"), group: groupOf(v("machine")), type: f.querySelector("input[name=type]:checked").value, start: s, end: e, reason: v("reason").trim(), action: (f.elements.action?.value || "").trim(), owner: (f.elements.owner?.value || "").trim(), eta: f.elements.eta?.value || "", endBy: e && !old?.end ? me.name : old?.endBy || "" };
     await put(rec, `${old ? "Changed" : "Logged"} ${rec.machine}: ${TYPES[rec.type]} ${hhmm(s)}${e ? "–" + hhmm(e) : " (still going)"}${rec.reason ? " · " + rec.reason : ""}${rec.action ? " · action: " + rec.action : ""}${rec.owner ? " · " + rec.owner : ""}${rec.eta ? " · ETA " + fmt(rec.eta) : ""}`);
+    if (old && old.type !== rec.type) await retypeBoxes(rec.machine, toMs(rec.start), rec.end ? toMs(rec.end) : 0, old.type, rec.type);   // the hour boxes follow the new kind
     const hc = f.elements.hourcell?.value; if (hc) { const [hd, hm2, hh] = hc.split("|"); await clearRest(hd, hm2, +hh); }   // the whole-hour entry in that hour is replaced by the typed times
     closeEv(); render(); toast(`Saved: ${rec.machine} ${TYPES[rec.type].toLowerCase()} from ${hhmm(s)}${e ? " to " + hhmm(e) : ""}.`);
     if (!old && rec.type === "BD" && mailList().length) openEv(mailForm(recs.find(x => x.id === rec.id) || rec), "Email this breakdown"); return; }
