@@ -1492,7 +1492,7 @@ async function syncNow(manual) {
     const snap = full ? await getDocs(query(collection(db, "ctrl"), where("ym", "in", yms))) : { docs: [] }; if (full) sync.fullAt = Date.now();
     let n = 0; for (const d of snap.docs) { const r = d.data(), have = recs.find(x => x.id === r.id);
       if (!have || (r.editedAt || 0) > (have.editedAt || 0)) { const nr = { ...r, synced: r.editedAt }; await tx("readwrite", t => t.objectStore("rec").put(nr)); n++; } }
-    recs = await all(); bump(); dutyCheck(); await approvePhumi().catch(() => {}); if (me) { await backfillRigs(); await busUpdate(); await seedFleetReports(); await clearAhead(); await purgeFuture(); await undoDay21(); await restoreDay21(); await busesDown21(); await joinRuns(); await cof22(); await seedChats2().catch(e => console.warn(e)); await fixDown26().catch(e => console.warn(e)); await healCells(); await fixNames().catch(e => console.warn(e)); await keepAchieved(); } sync.bad = bad; if (!bad) { sync.last = Date.now(); await metaSet("syncLast", sync.last); } liveWatch(yms); sync.msg = `Sent and checked ${new Date(Date.now()).toTimeString().slice(0, 5)}${n ? ` · ${n} changes from other devices` : ""}.`;
+    recs = await all(); bump(); dutyCheck(); await approvePhumi().catch(() => {}); if (me) { await backfillRigs(); await busUpdate(); await seedFleetReports(); await clearAhead(); await purgeFuture(); await undoDay21(); await restoreDay21(); await busesDown21(); await joinRuns(); await cof22(); await seedChats2().catch(e => console.warn(e)); await fixDown26().catch(e => console.warn(e)); await drillsZero().catch(e => console.warn(e)); await healCells(); await fixNames().catch(e => console.warn(e)); await keepAchieved(); } sync.bad = bad; if (!bad) { sync.last = Date.now(); await metaSet("syncLast", sync.last); } liveWatch(yms); sync.msg = `Sent and checked ${new Date(Date.now()).toTimeString().slice(0, 5)}${n ? ` · ${n} changes from other devices` : ""}.`;
     if (manual) toast("The TKR app is up to date.");
   } catch (e) { console.warn(e); sync.msg = e?.code === "permission-denied" ? "The TKR app's Firebase rules don't allow the Control Room yet (Muneer publishes them once)." : "Couldn't reach the TKR app. It tries again by itself."; if (manual) toast(sync.msg); }
   sync.busy = false; if (me && !sheetDirty && !document.activeElement?.closest?.("#fDay") && !document.getElementById("evPanel") && !document.querySelector(".sheet:not([hidden])")) render();
@@ -1535,6 +1535,16 @@ async function fixDown26() {
       if (!ch) continue; n++; const notes = { ...(old?.notes || {}) }; for (const sh of ["Day", "Night"]) if (!(notes[sh] || "").trim()) notes[sh] = why;
       await put({ ...(old || { id, kind: "hr", ym: d.slice(0, 7), date: d, machine: mc }), deleted: false, cells, notes }, null, AD); } }
   await put({ id: KEY, kind: "seed", ym: "setup", at: now, date: today() }, "TDR013 08:00–09:00 on 26/11 changed from operating to breakdown (captured by mistake). Drill rigs on breakdown every hour from 01/11, TKR023 and TKR024 from 12/11", AD);
+  undo = keep; await metaSet("undo", undo).catch(() => {}); bump(); render(); }
+/* once: the drill rigs are not on site, so their hour meter is 0 opening and 0 closing every shift of November 2026 (Muneer, 26/11 10:44) */
+async function drillsZero() {
+  const KEY = "seed_drills_zero_2026-11"; if (recs.some(r => r.id === KEY)) return;
+  const keep = undo.slice();
+  for (const mc of ["TDR013", "TDR014", "TDR015"]) for (let d = "2026-11-01"; d <= "2026-11-30"; d = addDays(d, 1)) {
+    const id = `hr_${d}_${mc}`, old = recs.find(r => r.id === id && !r.deleted), M = old?.meter || {};
+    if (["Day", "Night"].every(sh => M[sh]?.open === 0 && M[sh]?.close === 0)) continue;
+    await put({ ...(old || { id, kind: "hr", ym: d.slice(0, 7), date: d, machine: mc, cells: {} }), deleted: false, meter: { ...M, Day: { open: 0, close: 0 }, Night: { open: 0, close: 0 } } }, null, "Admin"); }
+  await put({ id: KEY, kind: "seed", ym: "setup", at: Date.now(), date: today() }, "Drill rigs TDR013, TDR014 and TDR015: opening and closing hours set to 0 for every shift of November 2026 (not on site)", "Admin");
   undo = keep; await metaSet("undo", undo).catch(() => {}); bump(); render(); }
 async function seedChats() {
   const KEY = "seed_chats_2026-11-26"; if (recs.some(r => r.id === KEY)) return;
