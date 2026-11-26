@@ -254,9 +254,11 @@ function render() {
   if (askMail && me && !me.admin) body = mailToView();
   else if (tab === "req") body = reqView();
   if (tab === "pre") body = preView(); if (tab === "inv") body = invView(); if (tab === "export") body = exportView(); if (tab === "settings") body = settingsView();
-  const ws = app.querySelector(".xlsheet")?.scrollTop, wl = app.querySelector(".xlsheet")?.scrollLeft;
+  const ws = app.querySelector(".xlsheet")?.scrollTop, wl = app.querySelector(".xlsheet")?.scrollLeft, py = scrollY, px = scrollX, XW = [...app.querySelectorAll(".xlwrap,.tbl")].map(e => [e.scrollLeft, e.scrollTop]);
   app.innerHTML = tabBar(tabs(), tab) + body; afterRender(app);
   const w = app.querySelector(".xlsheet"); if (w && ws != null) { w.scrollTop = ws; w.scrollLeft = wl; }
+  [...app.querySelectorAll(".xlwrap,.tbl")].forEach((e, i) => { if (XW[i]) { e.scrollLeft = XW[i][0]; e.scrollTop = XW[i][1]; } });
+  if (Math.abs(scrollY - py) > 2 || Math.abs(scrollX - px) > 2) scrollTo(px, py);   // the page stays where it was
 }
 let viewer = false;
 const dateBar = () => `<div class="dnav"><button data-dnav="-1" aria-label="Day before">‹</button><input type="date" id="dPick" value="${date}" max="${today()}"><button data-dnav="1" aria-label="Next day" ${date >= today() ? "disabled" : ""}>›</button>${date !== today() ? '<button data-today class="sm">Today</button>' : ""}</div>`;
@@ -1645,7 +1647,7 @@ async function syncNow(manual) {
     recs = await all(); bump(); dutyCheck(); await approvePhumi().catch(() => {}); if (me) { await backfillRigs(); await busUpdate(); await seedFleetReports(); await clearAhead(); await purgeFuture(); await undoDay21(); await restoreDay21(); await busesDown21(); await joinRuns(); await cof22(); await seedChats2().catch(e => console.warn(e)); await fixDown26().catch(e => console.warn(e)); await drillsZero().catch(e => console.warn(e)); await seedReports3().catch(e => console.warn(e)); await seedAreas().catch(e => console.warn(e)); await healCells(); await fixNames().catch(e => console.warn(e)); await keepAchieved(); } sync.bad = bad; if (!bad) { sync.last = Date.now(); await metaSet("syncLast", sync.last); } liveWatch(yms); sync.msg = `Sent and checked ${new Date(Date.now()).toTimeString().slice(0, 5)}${n ? ` · ${n} changes from other devices` : ""}.`;
     if (manual) toast("The TKR app is up to date.");
   } catch (e) { console.warn(e); sync.msg = e?.code === "permission-denied" ? "The TKR app's Firebase rules don't allow the Control Room yet (Muneer publishes them once)." : "Couldn't reach the TKR app. It tries again by itself."; if (manual) toast(sync.msg); }
-  sync.busy = false; if (me && !sheetDirty && !document.activeElement?.closest?.("#fDay") && !document.getElementById("evPanel") && !document.querySelector(".sheet:not([hidden])")) render();
+  sync.busy = false; if (canRedraw()) render(); else { clearTimeout(liveT); liveT = setTimeout(function again() { if (canRedraw()) render(); else liveT = setTimeout(again, 3000); }, 3000); }
 }
 /* once: the hours from 01/11/2026 to 25/11/2026 filled in from the Rompad, breakdown report and support fleet WhatsApp groups (asked 26/11/2026).
    A status carries on until the chats report a change. Only empty boxes are filled; anything a controller captured stays. */
@@ -1894,7 +1896,11 @@ async function busUpdate() {
   undo = keep; await metaSet("undo", undo).catch(() => {}); bump(); }
 /* live: changes made on any other PC or phone show here within seconds, dashboards included */
 let liveKey = "", liveOff = null, liveT = 0;
-const canRedraw = () => me && !sheetDirty && !document.activeElement?.closest?.("#fDay") && !document.getElementById("evPanel") && !document.getElementById("hpop") && !document.querySelector(".sheet:not([hidden])");
+let lastScroll = 0, touching = false;   // the screen is not redrawn in the background while someone is scrolling or touching it (it made the page jump)
+addEventListener("scroll", () => { lastScroll = Date.now(); }, { passive: true, capture: true }); addEventListener("wheel", () => { lastScroll = Date.now(); }, { passive: true });
+addEventListener("touchstart", () => { touching = true; lastScroll = Date.now(); }, { passive: true }); addEventListener("touchend", () => { touching = false; lastScroll = Date.now(); }, { passive: true });
+addEventListener("pointerdown", () => { lastScroll = Date.now(); }, { passive: true });
+const canRedraw = () => !touching && Date.now() - lastScroll > 2500 && me && !sheetDirty && !document.activeElement?.closest?.("#fDay") && !document.getElementById("evPanel") && !document.getElementById("hpop") && !document.querySelector(".sheet:not([hidden])");
 function liveWatch(yms) {
   const k = yms.join(","); if (k === liveKey && liveOff) return; liveOff?.(); liveKey = k;
   const { db, collection, query, where, onSnapshot } = fb;
@@ -1916,7 +1922,7 @@ function syncCardOld() {
 }
 addEventListener("online", () => syncNow(false));
 setInterval(() => { closeCarried().then(n => { if (n && me) render(); }); if (navigator.onLine && !sync.busy) syncNow(false).then(() => { if (me && (tab === "export" || tab === "req")) render(); }); }, 20000);   // keep every PC up to date
-setInterval(() => { if (me && (tab === "now" || tab === "day") && !sheetDirty && !document.activeElement?.closest?.("#fDay") && !document.getElementById("evPanel") && !document.querySelector(".sheet:not([hidden])")) render(); }, 60000);   // live times on the board
+setInterval(() => { if ((tab === "now" || tab === "day") && canRedraw()) render(); }, 60000);   // live times on the board
 
 /* ---------- Excel for one month: the same sheets as the control room workbook ---------- */
 /* ---------- Availability and breakdown report: every machine, the reasons and their share, every breakdown shift by shift ---------- */
