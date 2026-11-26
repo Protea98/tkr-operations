@@ -151,7 +151,8 @@ function reasonNow(m) { const s = statusNow(m); if (s?.reason) return s.reason.t
   const c = curShift(), [d, sh] = c.key.split("|"), [a] = shiftWin(d, sh), now = Date.now();
   const e = evs().filter(e => e.machine === m && toMs(e.start) <= now && evEnd(e) > a && e.reason).sort((x, y) => toMs(y.start) - toMs(x.start))[0];
   if (e) return e.reason.trim(); return (recs.find(r => r.id === `hr_${d}_${m}`)?.notes?.[sh] || "").trim(); }
-function stateNow(m) { if (offNow(m)) return "OFF"; const s = statusNow(m), c = curShift(), [d, sh] = c.key.split("|"), C = cellsOf(d, m), now = Date.now();
+const stateNow = m => { const v = stateNow0(m); return v === "SB" ? "OP" : v; };   // refuelling / standby is available: shown as operating (26/11)
+function stateNow0(m) { if (offNow(m)) return "OFF"; const s = statusNow(m), c = curShift(), [d, sh] = c.key.split("|"), C = cellsOf(d, m), now = Date.now();
   const h = HRS(sh).filter(x => hStart(d, x) <= now && C[x] && C[x] !== "-").at(-1);   // a blank (cleared) box says nothing: the last box filled in counts
   if (s && (h == null || toMs(s.start) >= hStart(d, h))) return s.type;     // the newest of the logged time and the sheet wins
   if (h != null) {
@@ -332,7 +333,7 @@ function hourBoard() {
       else if (dn > 0) { stops.push(`${dc} 0% ${Math.min(pct, up)}%`); pos = Math.min(pct, up); }
       const backUp = SG.length && SG.at(-1).b < Date.now() - 1e3;   // the breakdown has ended: the rest of the hour is working (green)
       if (backUp) { if (pos < 100) stops.push(`${base} ${pos}% 100%`); } else { if (pos < up) stops.push(`${base} ${pos}% ${up}%`); if (up < 100) stops.push(`#202220 ${up}% 100%`); } }
-    const spl = (t === "OP" || t === "SB") && !SG.length ? recs.find(r => r.id === `hr_${d}_${mc}` && !r.deleted)?.sp?.[h] : null;   // OP / RF changed inside the hour: old colour up to that minute
+    const spl = false && (t === "OP" || t === "SB") && !SG.length ? recs.find(r => r.id === `hr_${d}_${mc}` && !r.deleted)?.sp?.[h] : null;   // OP / RF changed inside the hour: old colour up to that minute
     if (spl) { const k1 = Math.round((spl.at - x0) / 36e3), pc = spl.v === "SB" ? "#4d4116" : "#1f4d33"; stops.length = 0; stops.push(`${pc} 0% ${k1}%`, `${base} ${k1}% ${cur ? up : 100}%`); if (cur && up < 100) stops.push(`#202220 ${up}% 100%`); }
     const lbl2 = spl ? `${t === "SB" ? "RF" : "OP"} ${tOf(spl.at)}` : lbl;
     const bg = stops.length ? `style="background:linear-gradient(to right,${stops.join(",")})"` : "";
@@ -571,7 +572,7 @@ function cellVal(d, mc, h, C = cellsOf(d, mc)) {
   if (C[h] === "-") { const a0 = hStart(d, h), ex = downEvs(mc).filter(e => !e.grid && toMs(e.start) < a0 + 36e5 && evEnd(e) > a0);   // cleared box, but exact times were typed in that hour: they show
     return ex.length ? (ex.some(x => x.type === "BD") ? "BD" : "PM") : ""; }
   if ((C[h] === "BD" || C[h] === "PM") && (gridGone(mc, hStart(d, h)) || boxAfterTimes(d, mc, h, C))) return "OP";   // box picked before the real times were typed in: the times win, the machine was working
-  if (C[h]) return C[h];
+  if (C[h]) return C[h] === "SB" ? "OP" : C[h];   // refuelling / standby counts as operating
   const a = hStart(d, h), b = a + 36e5, s0 = shiftWin(d, h < 18 ? "Day" : "Night")[0];
   if (a > Date.now()) return "";
   const e = downEvs(mc).filter(e => toMs(e.start) < b && evEnd(e) > a && (e.end || toMs(e.start) >= s0));   // a breakdown still open from an earlier shift does not fill the new shift's boxes
@@ -584,7 +585,7 @@ function carryFrom(d, mc, h, depth = 0) {
   const k = `${d}|${mc}|${h}`; if (cvMemo.has(k)) return cvMemo.get(k); if (depth > 48) return "";
   const [d2, h2] = prevHour(d, h), a = hStart(d2, h2), b = a + 36e5; let v = "";
   if (!offAt(mc, a)) { const C = cellsOf(d2, mc);
-    if (C[h2]) v = C[h2] === "BD" || C[h2] === "PM" || C[h2] === "SB" ? C[h2] : "";   // "-" (cleared) and OP stop it
+    if (C[h2]) v = C[h2] === "BD" || C[h2] === "PM" ? C[h2] : "";   // "-" (cleared) and OP stop it
     else { const E = downEvs(mc).filter(e => toMs(e.start) < b && evEnd(e) > a);
       if (E.length) { const g = E.filter(e => e.grid && evEnd(e) <= b); v = g.length === E.length ? (E.some(x => x.type === "BD") ? "BD" : "PM") : (E.some(e => evEnd(e) >= b) ? (E.some(x => x.type === "BD") ? "BD" : "PM") : ""); }
       else v = carryFrom(d2, mc, h2, depth + 1); } }
@@ -677,7 +678,7 @@ function firstDay(mc) { const k = "first|" + mc; if (lkMemo.has(k)) return lkMem
 function shiftTable(d, sh) {
   const [a, b] = shiftWin(d, sh), now = Date.now(), fut = a > now, H = HRS(sh);
   const tot = () => ({ avail: 0, BD: 0, PM: 0, down: 0 }), shT = tot(); let body = "";
-  const opt = v => ["", "OP", "SB", "BD", "PM"].map(o => `<option value="${o}" ${o === v ? "selected" : ""}>${o === "SB" ? "RF" : o}</option>`).join("");
+  const opt = v => ["", "OP", "BD", "PM"].map(o => `<option value="${o}" ${o === v ? "selected" : ""}>${o === "SB" ? "RF" : o}</option>`).join("");
   for (const [g, L0] of fleet()) { const L = L0.filter(mc => d >= firstDay(mc)); if (!L.length) continue; const gt = tot(), opCount = H.map(() => 0);   // a machine shows from the first day anything was captured for it, so empty rows don't look like missing days
     L.forEach((mc, i) => { const hr = recs.find(r => r.id === `hr_${d}_${mc}` && !r.deleted), C = cellsOf(d, mc), E = downEvs(mc).filter(e => toMs(e.start) < b && evEnd(e) > a).sort((x, y) => toMs(x.start) - toMs(y.start)), s = shiftSum(mc, d, sh);
       const reason = [...new Set([...E.map(e => e.reason), hr?.notes?.[sh]].filter(Boolean))].join("; ");
@@ -690,7 +691,7 @@ function shiftTable(d, sh) {
           for (const g of SG) { const a1 = Math.round((g.a - x0) / 36e3), b1 = Math.round((g.b - x0) / 36e3); if (a1 > pos) stops.push(`${base} ${pos}% ${a1}%`); stops.push(`${LC[g.t] || "#ddd"} ${a1}% ${b1}%`); pos = b1; }
           const ended = SG.at(-1).b < Date.now() - 1e3; if (pos < 100) stops.push(`${ended || y0 <= Date.now() ? base : "#fff"} ${pos}% 100%`);
           st2 = `style="background:linear-gradient(to right,${stops.join(",")})!important;color:#222"`; lb = `<span style="font-size:9.5px;line-height:1.15;display:block">${SG.map(g => `<b>${g.t}</b><br>${tOf(g.a)}–${g.b >= Date.now() - 1e3 ? "now" : tOf(g.b)}`).join("<br>")}</span>`; }
-        const spl = !SG.length && (v === "OP" || v === "SB") ? hr?.sp?.[h] : null;
+        const spl = null;   // refuelling is shown as operating now: no OP / RF split
         if (spl) { const k1 = Math.round((spl.at - x0) / 36e3), pc = spl.v === "SB" ? "#fff2cc" : "#e2f0d9", nc = v === "SB" ? "#fff2cc" : "#e2f0d9", done = Math.min(100, Math.round((Math.min(y0, Date.now()) - x0) / 36e3));
           st2 = `style="background:linear-gradient(to right,${pc} 0% ${k1}%,#888 ${k1}% ${k1 + 1}%,${nc} ${k1 + 1}% ${done}%,#fff ${done}% 100%)!important;color:#222"`; lb = `<span style="font-size:9.5px;line-height:1.15;display:block"><b>${spl.v === "SB" ? "RF" : "OP"}</b> → <b>${v === "SB" ? "RF" : "OP"}</b><br>${tOf(spl.at)}</span>`; }
         return `<td class="hc"><button type="button" data-hcell="${esc(mc)}|${h}" data-v="${v}" ${st2} class="hbtn ty ${v}${carry ? " carry" : ""}${auto ? " auto" : ""}" title="${carry ? "Carried on from a breakdown that has not been closed. Tap and pick OP if it was working." : "Tap to pick OP, RF, BD or PM. Tap the same one again to clear it."}">${lb}</button></td>`; }).join("");
@@ -876,7 +877,7 @@ async function statusPicture() {
     else { const ended = SG.at(-1).b < now - 1e3; x.fillStyle = HC[base][0]; x.fillRect(X, Y, w * ((ended ? y0 : lim) - a0) / 36e5, hh);
       for (const g of SG) { x.fillStyle = (HC[g.t] || HC.BD)[0]; x.fillRect(X + w * (g.a - a0) / 36e5, Y, w * (g.b - g.a) / 36e5, hh); } }
     x.restore(); box(X, Y, w, hh, 6, null, HC[main][1]); };
-  { let lx = P; font(500, 13); for (const [k, l] of [["OP", "Operating"], ["SB", "Refuelling"], ["BD", "Breakdown"], ["PM", "Planned maintenance"], ["-", "Not filled in"], ["~", "Hour running"], ["", "Hour not reached"]]) {   // colour key
+  { let lx = P; font(500, 13); for (const [k, l] of [["OP", "Operating"], ["BD", "Breakdown"], ["PM", "Planned maintenance"], ["-", "Not filled in"], ["~", "Hour running"], ["", "Hour not reached"]]) {   // colour key
       if (HC[k]) box(lx, 196, 24, 15, 4, HC[k][0], HC[k][1]); else if (k === "-") box(lx, 196, 24, 15, 4, "#262826", "#333"); else if (k === "~") { box(lx, 196, 24, 15, 4, "#1f4d33cc"); x.setLineDash([3, 3]); box(lx, 196, 24, 15, 4, null, "#2e7d4f"); x.setLineDash([]); } else { x.setLineDash([3, 3]); box(lx, 196, 24, 15, 4, null, "#4a524e"); x.setLineDash([]); }
       x.fillStyle = T.muted; x.fillText(l, lx + 30, 208); lx += 30 + x.measureText(l).width + 20; } }
   let y = 228;
@@ -1286,8 +1287,8 @@ function cellMenu(btn) {
   const [mc0, h0] = btn.dataset.hcell.split("|"), d0 = $("fDay")?.dataset.date || today(), a0 = hStart(d0, +h0), pv = prevHour(d0, +h0), pc = cellVal(pv[0], mc0, pv[1]);
   const dn = downEvs(mc0).filter(e => toMs(e.start) < a0 && evEnd(e) >= a0 - 6e4).sort((x, y) => toMs(y.start) - toMs(x.start))[0];
   const def = dn ? dn.type : ["OP", "SB", "BD", "PM"].includes(pc) ? pc : "OP";   // what the machine was doing before this hour, as the app has it
-  pop.innerHTML = `<label style="display:block;font-size:12px;margin:0 2px 8px">Previous status<select id="hPrev" style="display:block;width:100%;margin-top:4px">${[["OP", "Operating"], ["SB", "Refuelling"], ["BD", "Breakdown"], ["PM", "Planned maintenance"]].map(([k, t]) => `<option value="${k}" ${k === def ? "selected" : ""}>${t}</option>`).join("")}</select></label>`
-    + ["OP", "SB", "BD", "PM"].map(o => `<button type="button" class="ty ${o}${o === v ? " cur" : ""}" data-hpick="${o}">${LB[o]}${o === v ? " ✓" : ""}</button>`).join("") + `<button type="button" class="clr" data-hpick="">Clear</button>`
+  pop.innerHTML = `<label style="display:block;font-size:12px;margin:0 2px 8px">Previous status<select id="hPrev" style="display:block;width:100%;margin-top:4px">${[["OP", "Operating"], ["BD", "Breakdown"], ["PM", "Planned maintenance"]].map(([k, t]) => `<option value="${k}" ${k === def ? "selected" : ""}>${t}</option>`).join("")}</select></label>`
+    + ["OP", "BD", "PM"].map(o => `<button type="button" class="ty ${o}${o === v ? " cur" : ""}" data-hpick="${o}">${LB[o]}${o === v ? " ✓" : ""}</button>`).join("") + `<button type="button" class="clr" data-hpick="">Clear</button>`
     + (v ? `<small>Tap ${v} again to clear it</small>` : "");
   pop.dataset.cell = btn.dataset.hcell; pop.dataset.cur = v; document.body.appendChild(pop);
   const w = pop.offsetWidth, h = pop.offsetHeight; pop.style.left = scrollX + Math.max(6, Math.min(innerWidth - w - 6, r.left + r.width / 2 - w / 2)) + "px"; pop.style.top = scrollY + (r.bottom + h + 8 > innerHeight ? r.top - h - 4 : r.bottom + 4) + "px";
