@@ -268,3 +268,7 @@ table.mini.mnt td{vertical-align:top}table.mini.mnt td .sm{margin:2px 0}
 .pitticks.need{border:1px solid #d4a12a;background:rgba(212,161,42,.08)}
 .pitticks .pt{display:inline-flex!important;flex-direction:row!important;gap:6px;align-items:center;font-size:15px;cursor:pointer;margin:0}
 .pitticks .pt input{width:20px;height:20px;accent-color:#d4a12a}
+.pittick{display:inline-flex!important;flex-direction:row!important;align-items:center;gap:4px;margin:4px 0 0 6px;padding:2px 8px;border-radius:999px;border:1px solid rgba(128,128,128,.5);font-size:11.5px;font-weight:700;cursor:pointer;opacity:.6;user-select:none;vertical-align:middle}
+.pittick input{width:14px;height:14px;margin:0;accent-color:#d4a12a}
+.pittick.on{opacity:1;background:#d4a12a;color:#111;border-color:#d4a12a}
+td.lt .pittick{display:flex!important;margin:4px 0 0;width:max-content}
