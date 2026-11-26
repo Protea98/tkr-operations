@@ -179,7 +179,9 @@ function metresLast(m, before) { const rig = m.replace(/\s+/g, ""); let best = n
 function knownSince(m, t) { if (t == null) return null; if (t >= BACKSTART) return t; return metresLast(m, t); }
 function downSince(m, t0 = stateNow(m)) { const now = Date.now(), e = statusNow(m); let since = e && e.type === t0 ? toMs(e.start) : null;   // walk back through the hour boxes while it stayed down
   for (let t = now, i = 0; i < 24 * 60; i++, t -= 36e5) { const dt = new Date(t), hh = dt.getHours(), d0 = ymd(dt), dd = hh < 6 ? addDays(d0, -1) : d0, h = hh < 6 ? hh + 24 : hh, v = cellsOf(dd, m)[h];
-    const ev = downEvs(m).some(q => q.type === t0 && toMs(q.start) <= t && evEnd(q) > t - 36e5); if (v === t0 || ev) { const hs = hStart(dd, h); since = since == null ? hs : Math.min(since, hs); } else if (v && v !== "-") break; }
+    const ev = downEvs(m).some(q => q.type === t0 && toMs(q.start) <= t && evEnd(q) > t - 36e5); if (v === t0 || ev) { const hs = hStart(dd, h), E = downEvs(m).filter(q => q.type === t0 && toMs(q.start) < hs + 36e5 && evEnd(q) > hs);
+      const at = E.length ? Math.max(hs, Math.min(...E.map(q => toMs(q.start)))) : hs;   // the typed time inside the hour (PM 06:45), not the top of the hour
+      since = since == null ? at : Math.min(since, at); if (at > hs) break; } else if (v && v !== "-") break; }
   return knownSince(m, since); }
 function statusNow(m) { const t = Date.now(); return evs().filter(e => e.machine === m && toMs(e.start) <= t && (!e.end || toMs(e.end) > t)).sort((a, b) => toMs(b.start) - toMs(a.start))[0] || null; }
 
@@ -826,15 +828,19 @@ async function statusPicture() {
   const HC = { OP: ["#1f4d33", "#2e7d4f"], SB: ["#4d4116", "#a8892c"], BD: ["#6b1f19", "#b3402f"], PM: ["#1d3a5f", "#3b6ea8"] };   // same as the hour board
   const block = (m, h, X, Y, w, hh) => {   // one hour box, split by the real times like the hour board
     const a0 = hStart(sd, h), y0 = a0 + 36e5; if (a0 > now) { x.setLineDash([3, 3]); box(X, Y, w, hh, 6, null, "#333a37"); x.setLineDash([]); return; }
-    const v = offAt(m, a0) ? "OFF" : cellVal(sd, m, h), lim = Math.min(y0, now); if (!v || v === "OFF") { box(X, Y, w, hh, 6, "#262826", "#333"); return; }
+    let v = offAt(m, a0) ? "OFF" : cellVal(sd, m, h); const lim = Math.min(y0, now);
+    if ((!v || v === "-") && now < y0 && !offAt(m, a0)) { const c0 = HC[st(m)] || HC.OP;   // the hour running now, not filled in yet: the status it is on, up to this minute
+      x.save(); x.beginPath(); x.roundRect(X, Y, w, hh, 6); x.clip(); x.fillStyle = "#262826"; x.fillRect(X, Y, w, hh); x.globalAlpha = .45; x.fillStyle = c0[0]; x.fillRect(X, Y, w, hh); x.globalAlpha = 1; x.fillRect(X, Y, Math.max(3, w * (now - a0) / 36e5), hh); x.restore();
+      x.setLineDash([3, 3]); box(X, Y, w, hh, 6, null, c0[1]); x.setLineDash([]); return; }
+    if (!v || v === "OFF") { box(X, Y, w, hh, 6, "#262826", "#333"); return; }
     const SG = evSegs(m, a0, lim).filter(g => !(g.a <= a0 && g.b >= lim - 1e3)), base = v === "SB" ? "SB" : "OP", main = SG.length ? base : (HC[v] ? v : "OP");
     x.save(); x.beginPath(); x.roundRect(X, Y, w, hh, 6); x.clip(); x.fillStyle = "#262826"; x.fillRect(X, Y, w, hh);
     if (!SG.length) { x.fillStyle = HC[main][0]; x.fillRect(X, Y, w * (lim - a0) / 36e5, hh); }
     else { const ended = SG.at(-1).b < now - 1e3; x.fillStyle = HC[base][0]; x.fillRect(X, Y, w * ((ended ? y0 : lim) - a0) / 36e5, hh);
       for (const g of SG) { x.fillStyle = (HC[g.t] || HC.BD)[0]; x.fillRect(X + w * (g.a - a0) / 36e5, Y, w * (g.b - g.a) / 36e5, hh); } }
     x.restore(); box(X, Y, w, hh, 6, null, HC[main][1]); };
-  { let lx = P; font(500, 13); for (const [k, l] of [["OP", "Operating"], ["SB", "Refuelling"], ["BD", "Breakdown"], ["PM", "Planned maintenance"], ["-", "Not filled in"], ["", "Hour not reached"]]) {   // colour key
-      if (HC[k]) box(lx, 196, 24, 15, 4, HC[k][0], HC[k][1]); else if (k === "-") box(lx, 196, 24, 15, 4, "#262826", "#333"); else { x.setLineDash([3, 3]); box(lx, 196, 24, 15, 4, null, "#4a524e"); x.setLineDash([]); }
+  { let lx = P; font(500, 13); for (const [k, l] of [["OP", "Operating"], ["SB", "Refuelling"], ["BD", "Breakdown"], ["PM", "Planned maintenance"], ["-", "Not filled in"], ["~", "Hour running"], ["", "Hour not reached"]]) {   // colour key
+      if (HC[k]) box(lx, 196, 24, 15, 4, HC[k][0], HC[k][1]); else if (k === "-") box(lx, 196, 24, 15, 4, "#262826", "#333"); else if (k === "~") { box(lx, 196, 24, 15, 4, "#1f4d33cc"); x.setLineDash([3, 3]); box(lx, 196, 24, 15, 4, null, "#2e7d4f"); x.setLineDash([]); } else { x.setLineDash([3, 3]); box(lx, 196, 24, 15, 4, null, "#4a524e"); x.setLineDash([]); }
       x.fillStyle = T.muted; x.fillText(l, lx + 30, 208); lx += 30 + x.measureText(l).width + 20; } }
   let y = 228;
   const wrap = (t, w, max) => { const out = []; let ln = ""; for (const wd of String(t).split(/\s+/)) { const t2 = ln ? ln + " " + wd : wd; if (x.measureText(t2).width > w && ln) { out.push(ln); ln = wd; } else ln = t2; } if (ln) out.push(ln);
