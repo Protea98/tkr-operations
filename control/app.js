@@ -239,7 +239,7 @@ function gateView() {
 }
 
 /* ---------- views ---------- */
-const TABS = [["now", "Live board and workbook", "deploy"], ["files", "Documents", "docs"], ["inv", "Invoicing", "money"], ["export", "Export & sync", "import"], ["settings", "Settings", "settings"]];
+const TABS = [["now", "Live board and workbook", "deploy"], ["files", "Documents", "docs"], ["pre", "Checklists", "docs"], ["inv", "Invoicing", "money"], ["export", "Export & sync", "import"], ["settings", "Settings", "settings"]];
 const pendingReqs = () => R("req").filter(q => q.status === "pending").length + R("user").filter(u => u.status === "pending").length;
 const tabs = () => { const n = pendingReqs(); return [TABS[0], TABS[1], ["req", `Change requests${n ? ` (${n})` : ""}`, "missing"], ...TABS.slice(2)]; };
 function render() {
@@ -253,7 +253,7 @@ function render() {
   if (tab === "now") body = nowView(); if (tab === "avail") body = availView(); if (tab === "docs") body = docsView(); if (tab === "files") body = filesView();
   if (askMail && me && !me.admin) body = mailToView();
   else if (tab === "req") body = reqView();
-  if (tab === "inv") body = invView(); if (tab === "export") body = exportView(); if (tab === "settings") body = settingsView();
+  if (tab === "pre") body = preView(); if (tab === "inv") body = invView(); if (tab === "export") body = exportView(); if (tab === "settings") body = settingsView();
   const ws = app.querySelector(".xlsheet")?.scrollTop, wl = app.querySelector(".xlsheet")?.scrollLeft;
   app.innerHTML = tabBar(tabs(), tab) + body; afterRender(app);
   const w = app.querySelector(".xlsheet"); if (w && ws != null) { w.scrollTop = ws; w.scrollLeft = wl; }
@@ -309,7 +309,8 @@ function nowView() {
         <div class="row" style="margin-top:8px;gap:6px"><button class="sm" data-addmg="${F.findIndex(x => x[0] === g)}">+ Add machine</button>${L.length ? `<button class="sm ghost" data-rmmg="${F.findIndex(x => x[0] === g)}">− Remove machine</button><button class="sm ghost" data-sitemg="${F.findIndex(x => x[0] === g)}">On site / not on site</button>` : ""}</div></section>`; }).join("")}</div>`
     + `<h2 class="secth">Rompad and Pit project</h2>` + areaCards()
     + hourBoard()
-    + `<div class="openers">${sheet("mtd", `Month-to-date availability · ${monthName(today().slice(0, 7))}`, mtdCard(), { icon: icon("hours"), sub: "every machine from the 1st to now, times in h:mm" })}${sheet("svc", "Hours until next service", svcCard(), { icon: icon("hours"), sub: "a hyphen where the next service reading is not set yet" })}</div>`
+    + `<div class="openers">${sheet("mtd", `Month-to-date availability · ${monthName(today().slice(0, 7))}`, mtdCard(), { icon: icon("hours"), sub: "every machine from the 1st to now, times in h:mm" })}${(() => { const { d, sh } = shiftNow(), L = preOf(d, sh), due = preDue(d, sh), got = new Set(L.map(p => p.machine)), miss = due.filter(m => !got.has(m)), A = preOpen().filter(f => f.it[2] === "A" && f.v === "NG");
+      return sheet("prechk", `Pre-use checklists · ${sh} shift`, `<p>Received <b>${due.filter(m => got.has(m)).length} of ${due.length}</b>${miss.length ? ` · missing: ${miss.map(esc).join(", ")}` : ""}</p>${A.length ? `<p style="color:#e0705f"><b>A-hazard NO GO – must not be used:</b> ${A.map(f => `${esc(f.p.machine)} (${esc(f.it[1])})`).join(", ")}</p>` : ""}<button data-tab="pre">Open checklists</button>`, { icon: icon("docs"), count: miss.length + A.length, cls: miss.length || A.length ? "alert" : "good", sub: "rockbreaker pre-use checklists this shift" }); })()}${sheet("svc", "Hours until next service", svcCard(), { icon: icon("hours"), sub: "a hyphen where the next service reading is not set yet" })}</div>`
     + `<div class="openers">${sheet("open", `Still down now (${open.length})`, open.map(evLine).join("") || '<p class="muted">Nothing open with a logged time.</p>', { icon: "!", count: open.length, cls: open.length ? "alert" : "good", sub: "breakdowns, standby and maintenance not closed yet" })}
       ${sheet("todayev", "This shift's breakdowns and maintenance", `<div class="res">${SE.map(seLine).join("") || '<p class="muted">Nothing on this shift yet.</p>'}</div>`, { icon: icon("bd"), count: SE.length, sub: `${ssh.toLowerCase()} shift from ${ssh === "Day" ? "06:00" : "18:00"}, from the sheet and the logged times` })}
       ${sheet("delays", `Delay summary · ${monthName(today().slice(0, 7))}`, delaySummary(today().slice(0, 7)), { icon: icon("bd"), sub: "lost time per machine and per cause this month" })}
@@ -672,6 +673,109 @@ async function setMeter(mc, d, sh, k, raw) {
   const m = { ...(rec.meter?.[sh] || {}), [k]: v === "" ? "" : +v };
   if (m.open !== undefined && m.open !== "" && m.close !== undefined && m.close !== "" && +m.close < +m.open) { toast("The closing hours can't be lower than the opening hours."); return false; }
   await put({ ...rec, deleted: false, meter: { ...(rec.meter || {}), [sh]: m } }, `${mc} ${sh.toLowerCase()} shift ${k === "open" ? "opening" : "closing"} hours: ${v ? mtxt(v) : "cleared"}`); return true; }
+/* ---------- Pre-use checklists: the Tharisa "Pre-use checklist – mobile rock breaker" (THA-ENG-OCL-012), captured from the photo ----------
+   Every item starts as GO; the controller taps only the NO GO and GO BUT ones. A-hazard NO GO = machine must not be used; B-hazard GO BUT = repair within 48 hours. */
+const PRE_ITEMS = [
+  ["fat", "Fatigued or on medication", "A", "no"], ["stop", "Will stop at all stop signs", "A", "yes"], ["lic", "Operator licence valid", "A", "yes"], ["brk", "Brakes", "A"],
+  ["ctl", "Controls", "A"], ["belt", "Seat belts working", "A"], ["eoil", "Engine oil levels / leaks", "A"], ["split", "Splitter box oil levels", "A"], ["hyd", "Hydraulic oil leaks", "A"],
+  ["rot", "Rotating light working", "A"], ["hand", "Handrails / steps", "A"], ["radio", "Two-way radio working", "A"], ["vds", "Vehicle detection system (VDS)", "A"], ["talarm", "Travel alarm", "A"],
+  ["doors", "Doors secured and lockable", "A"], ["rockp", "Rock protector (windscreen)", "A"], ["fire", "Fire extinguisher / tagged", "A"], ["hoot", "Hooter working", "A"], ["estop", "Emergency stop", "A"],
+  ["lock", "Lock out", "A"], ["mirr", "Mirrors condition", "A"], ["air", "Aircon system working", "A"], ["fuel", "Fuel leaks", "A"], ["cool", "Engine coolant leaks", "A"],
+  ["track", "Tracks – missing grouser shoes", "B"], ["wind", "Windscreen (visibility)", "B"], ["ems", "EMS / CMS check", "B"], ["light", "Working lights", "B"], ["seat", "Seats condition", "B"],
+  ["boom", "Boom / stick / slew / rockbreaker", "B"], ["bpin", "Boom pins", "B"], ["win", "Windows", "C"], ["wipe", "Wipers", "C"], ["seal", "Door / window seals", "C"]];
+const PRE_BY = Object.fromEntries(PRE_ITEMS.map(x => [x[0], x]));
+const PRE_CLS = { A: "A-hazard – machine must not be used until fixed", B: "B-hazard – repair within 48 hours", C: "C-hazard – repair during planned maintenance" };
+let preDay = null, preSh = null;
+const preRB = () => fleet().flatMap(([g, L]) => /rock/i.test(g) ? L : []);
+const preOf = (d, sh) => R("pre").filter(p => p.date === d && p.shift === sh);
+const preFinds = p => Object.entries(p.items || {}).filter(([, v]) => v === "NG" || v === "GB").map(([k, v]) => ({ k, v, it: PRE_BY[k] || [k, k, "C"], p }));
+const preWhen = p => toMs(p.date + (p.shift === "Night" ? "T18:00" : "T06:00"));
+/* machines a checklist was due for: on site and working at some point in the shift (the shift running now: every machine on site that is not down) */
+function preDue(d, sh) { const [a, b] = shiftWin(d, sh), now = Date.now();
+  return preRB().filter(mc => { if (offAt(mc, Math.min(now, a + 36e5))) return false; if (a <= now && now < b) return !["BD", "PM"].includes(stateNow(mc));
+    return HRS(sh).some(h => cellVal(d, mc, h) === "OP"); }); }
+function preOpen() { const out = []; for (const p of R("pre")) for (const f of preFinds(p)) { if (p.closed?.[f.k]) continue;
+    const same = out.find(o => o.p.machine === p.machine && o.k === f.k); if (same) { if (preWhen(p) > preWhen(same.p)) Object.assign(same, f); same.n++; continue; } out.push({ ...f, n: 1 }); }
+  return out.sort((x, y) => (x.it[2] > y.it[2] ? 1 : x.it[2] < y.it[2] ? -1 : 0) || preWhen(x.p) - preWhen(y.p)); }
+const preSmrCheck = p => { const o = meterOf(p.date, p.machine, p.shift).open; if (p.smr === "" || p.smr == null || o === undefined || o === "") return ""; const dlt = +p.smr - +o; return Math.abs(dlt) <= 1 ? "matches" : `differs by ${mtxt(Math.abs(dlt))} h (opening ${mtxt(o)})`; };
+function preStats(from, to) { const S = {}; for (const mc of preRB()) S[mc] = { due: 0, got: 0 };
+  const first = R("pre").reduce((m, p) => !m || p.date < m ? p.date : m, ""); if (!first) return S; if (from < first) from = first;   // counted from the first checklist captured in the app
+  for (let d = from; d <= to; d = addDays(d, 1)) for (const sh of ["Day", "Night"]) { if (shiftWin(d, sh)[0] > Date.now()) continue; const got = new Set(preOf(d, sh).map(p => p.machine));
+    for (const mc of preDue(d, sh)) { S[mc] = S[mc] || { due: 0, got: 0 }; S[mc].due++; if (got.has(mc)) S[mc].got++; } }
+  return S; }
+const pcTxt = (a, b) => b ? Math.round(a / b * 100) + "%" : "-";
+function preView() { const { d: d0, sh: s0 } = shiftNow(); const d = preDay || d0, sh = preSh || s0, L = preOf(d, sh), due = preDue(d, sh), got = new Set(L.map(p => p.machine)), miss = due.filter(m => !got.has(m)), OP = preOpen(), now = Date.now();
+  const wk = preStats(addDays(today(), -6), today()), mo = preStats(today().slice(0, 8) + "01", today()), tot = S => Object.values(S).reduce((a, x) => ({ due: a.due + x.due, got: a.got + x.got }), { due: 0, got: 0 });
+  const rep = {}; for (const p of R("pre").filter(p => p.date >= addDays(today(), -6))) for (const f of preFinds(p)) { const k = p.machine + "|" + f.k; rep[k] = (rep[k] || 0) + 1; }
+  const repL = Object.entries(rep).filter(([, n]) => n >= 2).sort((a, b) => b[1] - a[1]);
+  const top = {}; for (const p of R("pre").filter(p => p.ym === today().slice(0, 7))) for (const f of preFinds(p)) top[f.k] = (top[f.k] || 0) + 1;
+  const ageTxt = f => { const t = preWhen(f.p), h = (now - t) / 36e5; if (f.it[2] === "B") { const left = 48 - h; return left >= 0 ? `due in ${hm(left)} h` : `<b style="color:#c0392b">overdue by ${hm(-left)} h</b>`; } return h >= 48 ? `open ${Math.floor(h / 24)} days` : `open ${hm(h)} h`; };
+  const cls = f => f.it[2] === "A" && f.v === "NG" ? "bad" : f.it[2] === "A" ? "warn" : f.it[2] === "B" ? "warn" : "";
+  return pageHead("Control room", "Pre-use checklists", "Mobile rock breaker pre-use checklist: capture it from the photo, the app works out the findings", `<button class="primary" data-precap="">+ Capture checklist</button> <button data-prexl="">Download Excel</button> <button data-prewa="">Copy WhatsApp summary</button>`)
+    + `<div class="dnav"><button data-preday="-1" aria-label="Shift before">‹</button><b style="padding:0 10px">${fmt(d)} · ${sh} shift</b><button data-preday="1" aria-label="Next shift" ${d === d0 && sh === s0 ? "disabled" : ""}>›</button></div>`
+    + `<div class="tiles ctiles"><div class="tile ${miss.length ? "alert" : "good"}"><div class="l">Received this shift</div><div class="n">${due.filter(m => got.has(m)).length}<small>/${due.length}</small></div><div class="s">${miss.length ? "missing: " + miss.map(esc).join(", ") : "all in"}</div></div>
+      <div class="tile ${OP.some(f => f.it[2] === "A" && f.v === "NG") ? "alert" : ""}"><div class="l">A-hazard NO GO open</div><div class="n">${OP.filter(f => f.it[2] === "A" && f.v === "NG").length}</div><div class="s">machine must not be used</div></div>
+      <div class="tile"><div class="l">GO BUT / B open</div><div class="n">${OP.filter(f => !(f.it[2] === "A" && f.v === "NG")).length}</div><div class="s">${OP.filter(f => f.it[2] === "B" && (now - preWhen(f.p)) > 48 * 36e5).length} past 48 hours</div></div>
+      <div class="tile good"><div class="l">Completion</div><div class="n">${pcTxt(tot(wk).got, tot(wk).due)}</div><div class="s">last 7 days · month ${pcTxt(tot(mo).got, tot(mo).due)}</div></div></div>`
+    + `<section class="card"><h3>${sh} shift ${fmt(d)}</h3><table class="mini"><thead><tr><th>Machine</th><th>Checklist</th><th>Operator</th><th>SMR</th><th>SMR vs opening hrs</th><th>Findings</th><th></th></tr></thead><tbody>${due.concat(L.map(p => p.machine).filter(m => !due.includes(m))).map(mc => { const p = L.find(x => x.machine === mc);
+      if (!p) return `<tr><td>${esc(mc)}</td><td colspan="5" style="color:#c0392b"><b>Missing</b></td><td><button class="sm" data-precap="${esc(mc)}">Capture</button></td></tr>`;
+      const F = preFinds(p), ck = preSmrCheck(p); return `<tr><td>${esc(mc)}</td><td>${esc(p.no || "-")}</td><td>${esc(p.operator || "-")}</td><td>${p.smr === "" || p.smr == null ? "-" : mtxt(p.smr)}</td><td${ck && ck !== "matches" ? ' style="color:#c0392b"' : ""}>${ck || "-"}</td><td>${F.length ? F.map(f => `<span class="pf ${f.v === "NG" && f.it[2] === "A" ? "bad" : "warn"}">${f.v === "NG" ? "NO GO" : "GO BUT"}: ${esc(f.it[1])}</span>`).join(" ") : "All GO"}${p.other ? `<br><small>Other: ${esc(p.other)}</small>` : ""}</td><td>${p.doc ? `<button class="sm ghost" data-dview="${esc(p.doc)}">Photo</button>` : ""} <button class="sm ghost" data-precap="${esc(mc)}" data-preid="${esc(p.id)}">Edit</button></td></tr>`; }).join("") || `<tr><td colspan="7">-</td></tr>`}</tbody></table></section>`
+    + `<section class="card"><h3>Open defects</h3><table class="mini"><thead><tr><th>Machine</th><th>Item</th><th>Class</th><th>First / last seen</th><th>Status</th><th></th></tr></thead><tbody>${OP.map(f => `<tr class="${cls(f)}"><td>${esc(f.p.machine)}</td><td><b>${f.v === "NG" ? "NO GO" : "GO BUT"}</b> · ${esc(f.it[1])}${f.n > 1 ? ` <small>(${f.n} checklists)</small>` : ""}</td><td>${f.it[2] === "A" && f.v === "NG" ? "<b>A – must not be used</b>" : f.it[2] + "-hazard"}</td><td>${fmt(f.p.date).slice(0, 5)} ${f.p.shift}</td><td>${ageTxt(f)}</td><td><button class="sm" data-prefix="${esc(f.p.id)}|${f.k}">Fixed</button></td></tr>`).join("") || `<tr><td colspan="6">No open defects.</td></tr>`}</tbody></table></section>`
+    + `<section class="card"><h3>Last 7 days</h3><table class="mini"><thead><tr><th>Machine</th><th>Checklists</th><th>Completion</th><th>Month</th></tr></thead><tbody>${preRB().map(mc => `<tr><td>${esc(mc)}</td><td>${wk[mc]?.got || 0} of ${wk[mc]?.due || 0}</td><td>${pcTxt(wk[mc]?.got || 0, wk[mc]?.due || 0)}</td><td>${pcTxt(mo[mc]?.got || 0, mo[mc]?.due || 0)}</td></tr>`).join("")}</tbody></table>
+      <h3 style="margin-top:14px">Repeat defects (same item, same machine, 2 or more times in 7 days)</h3>${repL.length ? `<table class="mini"><tbody>${repL.map(([k, n]) => { const [mc, it] = k.split("|"); return `<tr><td>${esc(mc)}</td><td>${esc(PRE_BY[it]?.[1] || it)}</td><td>${n} times</td></tr>`; }).join("")}</tbody></table>` : '<p class="muted">-</p>'}
+      <h3 style="margin-top:14px">Most common defects · ${monthName(today().slice(0, 7))}</h3>${Object.keys(top).length ? `<table class="mini"><tbody>${Object.entries(top).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([k, n]) => `<tr><td>${esc(PRE_BY[k]?.[1] || k)}</td><td>${PRE_BY[k]?.[2] || ""}-hazard</td><td>${n}</td></tr>`).join("")}</tbody></table>` : '<p class="muted">-</p>'}</section>`; }
+function preForm(mc, id) { const { d: d0, sh: s0 } = shiftNow(), p = id ? R("pre").find(x => x.id === id) : null, d = p?.date || preDay || d0, sh = p?.shift || preSh || s0, I = p?.items || {};
+  const row = ([k, l, c, yn]) => { const v = I[k] || "", nm = "i_" + k;
+    const opts = yn ? [["", yn === "no" ? "No" : "Yes"], ["NG", yn === "no" ? "Yes" : "No"]] : [["", "GO"], ["NG", "NO GO"], ["GB", "GO BUT"]];
+    return `<div class="prow c${c}"><span>${esc(l)}</span><span class="pseg">${opts.map(([o, t]) => `<label class="${o === "NG" ? "ng" : o === "GB" ? "gb" : "go"}"><input type="radio" name="${nm}" value="${o}" ${v === o ? "checked" : ""}><b>${t}</b></label>`).join("")}</span></div>`; };
+  return `<form id="fPre" class="form" data-id="${esc(id || "")}">
+    <label>Photo of the checklist <input type="file" name="ph" accept="image/*" capture="environment"></label>${p?.doc ? `<small class="muted">A photo is saved. Choose a new one only to replace it.</small>` : ""}
+    <div class="grid2"><label>Date <input type="date" name="d" value="${d}" max="${today()}" required></label><label>Shift <select name="sh">${["Day", "Night"].map(x => `<option ${x === sh ? "selected" : ""}>${x}</option>`).join("")}</select></label>
+    <label>Equipment no. <select name="m" required>${preRB().map(x => `<option ${x === (p?.machine || mc) ? "selected" : ""}>${x}</option>`).join("")}</select></label><label>Checklist no. <input name="no" value="${esc(p?.no || "")}" inputmode="numeric" placeholder="e.g. 62695"></label>
+    <label>SMR / hour meter reading <input name="smr" value="${p?.smr ?? ""}" inputmode="decimal" placeholder="e.g. 7281"></label><label>Operator <input name="op" value="${esc(p?.operator || "")}"></label>
+    <label>COY no. <input name="coy" value="${esc(p?.coy || "")}"></label><label>Previous 4 checklists' deviations closed out <select name="prev4"><option value="">-</option><option ${p?.prev4 === "Yes" ? "selected" : ""}>Yes</option><option ${p?.prev4 === "No" ? "selected" : ""}>No</option></select></label></div>
+    <p class="muted" style="margin:10px 0 4px">Everything starts as GO. Tap only what is marked NO GO or GO BUT on the sheet.</p>
+    ${["A", "B", "C"].map(c => `<h4 class="pcls c${c}">${PRE_CLS[c]}</h4>` + PRE_ITEMS.filter(x => x[2] === c).map(row).join("")).join("")}
+    <label>Other defects or safety concerns <textarea name="other" rows="2">${esc(p?.other || "")}</textarea></label><label>Artisan comments <textarea name="art" rows="2">${esc(p?.artisan || "")}</textarea></label>
+    <button class="primary" style="width:100%;min-height:52px;margin-top:12px">Save checklist</button></form>`; }
+async function savePre(f) { const E = f.elements, id = f.dataset.id || "pre_" + uid(), old = R("pre").find(x => x.id === id), d = E.d.value, sh = E.sh.value, mc = E.m.value;
+  const items = {}; for (const [k] of PRE_ITEMS) { const v = f.querySelector(`input[name="i_${k}"]:checked`)?.value || ""; if (v) items[k] = v; }
+  const smr = String(E.smr.value).trim().replace(/\s/g, "").replace(",", "."); if (smr && !/^\d+(\.\d+)?$/.test(smr)) { toast("Type the SMR reading as a number."); return; }
+  const btn = f.querySelector("button.primary"); btn.disabled = true; btn.textContent = "Saving…"; let doc = old?.doc || "";
+  const file = E.ph.files[0]; if (file) { try { const data = await shrinkImg(file), fid = uid(), parts = Math.max(1, Math.ceil(data.length / 700000));
+      for (let i = 0; i < parts; i++) await fileSet(`${fid}_${i}`, data.slice(i * 700000, (i + 1) * 700000));
+      doc = "doc_" + fid; await put({ id: doc, kind: "doc", ym: d.slice(0, 7), date: d, shift: sh, machine: mc, group: groupOf(mc), type: "Pre-use checklist", name: `Pre-use checklist ${mc} ${d} ${sh}.jpg`, mime: "image/jpeg", fid, parts, size: Math.round(data.length * 0.75) }); }
+    catch (e) { console.warn(e); toast("The photo couldn't be read. The checklist is saved without it."); } }
+  const F = Object.entries(items).map(([k, v]) => `${v === "NG" ? "NO GO" : "GO BUT"} ${PRE_BY[k][1]}`);
+  await put({ ...(old || {}), id, kind: "pre", ym: d.slice(0, 7), date: d, shift: sh, machine: mc, no: E.no.value.trim(), smr: smr === "" ? "" : +smr, operator: E.op.value.trim(), coy: E.coy.value.trim(), prev4: E.prev4.value, items, other: E.other.value.trim(), artisan: E.art.value.trim(), doc, closed: old?.closed || {} },
+    `Pre-use checklist ${mc} ${sh.toLowerCase()} shift ${fmt(d).slice(0, 5)}: ${F.length ? F.join(", ") : "all GO"}`);
+  if (smr !== "") { const m0 = meterOf(d, mc, sh); if (m0.open === undefined || m0.open === "") await setMeter(mc, d, sh, "open", smr); }   // the SMR reading fills the opening hours when they are still empty
+  closeEv(); preDay = d; preSh = sh; render(); toast(Object.entries(items).some(([k, v]) => v === "NG" && PRE_BY[k][2] === "A") ? `Saved. ${mc} has an A-hazard NO GO: it must not be used until fixed.` : "Checklist saved."); }
+async function preFixed(v) { const [id, k] = v.split("|"), p = R("pre").find(x => x.id === id); if (!p) return;
+  await put({ ...p, closed: { ...(p.closed || {}), [k]: { at: Date.now(), by: me?.name || "" } } }, `${p.machine}: ${PRE_BY[k]?.[1] || k} fixed (pre-use checklist ${fmt(p.date).slice(0, 5)} ${p.shift})`);
+  for (const q of R("pre").filter(q => q.machine === p.machine && q.id !== p.id && q.items?.[k] && !q.closed?.[k] && preWhen(q) <= preWhen(p))) await put({ ...q, closed: { ...(q.closed || {}), [k]: { at: Date.now(), by: me?.name || "" } } });
+  render(); toast("Marked as fixed."); }
+function preWhatsApp() { const { d: d0, sh: s0 } = shiftNow(), d = preDay || d0, sh = preSh || s0, L = preOf(d, sh), due = preDue(d, sh), got = new Set(L.map(p => p.machine)), miss = due.filter(m => !got.has(m)), OP = preOpen();
+  const A = OP.filter(f => f.it[2] === "A" && f.v === "NG"), B = OP.filter(f => !(f.it[2] === "A" && f.v === "NG")), flag = L.map(p => [p, preSmrCheck(p)]).filter(([, c]) => c && c !== "matches");
+  return [`*TKR Operations – pre-use checklists*`, `${fmt(d)} · ${sh} shift`, ``, `Received: ${due.filter(m => got.has(m)).length} of ${due.length}${miss.length ? ` (missing: ${miss.join(", ")})` : ""}`, ``,
+    `*A-hazard NO GO – must not be used*`, ...(A.length ? A.map(f => `• ${f.p.machine} – ${f.it[1]} (${fmt(f.p.date).slice(0, 5)} ${f.p.shift})`) : ["-"]), ``,
+    `*GO BUT / B-hazard – repair within 48 hours*`, ...(B.length ? B.map(f => `• ${f.p.machine} – ${f.it[1]} (${fmt(f.p.date).slice(0, 5)} ${f.p.shift})`) : ["-"]),
+    ...(flag.length ? [``, `*SMR reading vs opening hours*`, ...flag.map(([p, c]) => `• ${p.machine} – SMR ${mtxt(p.smr)} ${c}`)] : [])].join("\n"); }
+async function preExcel() { await new Promise((res, rej) => { if (window.ExcelJS) return res(); const s = document.createElement("script"); s.src = "../lib/exceljs.min.js"; s.onload = res; s.onerror = rej; document.head.appendChild(s); });
+  const wb = new window.ExcelJS.Workbook(); wb.creator = "TKR Operations"; const ym = today().slice(0, 7), GOLD = "FFC9A227", BLK = "FF111111";
+  const sheet = (name, title, cols, rows, widths) => { const ws = wb.addWorksheet(name, { views: [{ showGridLines: false, state: "frozen", ySplit: 4 }] });
+    ws.mergeCells(1, 1, 1, cols.length); ws.getCell(1, 1).value = "TKR OPERATIONS · " + title; ws.getCell(1, 1).font = { bold: true, size: 14, color: { argb: "FFFFFFFF" } }; ws.getCell(1, 1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: BLK } }; ws.getRow(1).height = 26;
+    ws.mergeCells(2, 1, 2, cols.length); ws.getCell(2, 1).value = `Tharisa Mine · ${monthName(ym)} · downloaded ${fmt(today())} ${tOf(Date.now())}`; ws.getCell(2, 1).font = { color: { argb: GOLD }, size: 10 }; ws.getCell(2, 1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: BLK } };
+    ws.getRow(4).values = cols; ws.getRow(4).eachCell(c => { c.font = { bold: true, color: { argb: "FFFFFFFF" } }; c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: BLK } }; c.alignment = { wrapText: true, vertical: "middle" }; c.border = { bottom: { style: "medium", color: { argb: GOLD } } }; });
+    rows.forEach((r, i) => { const R0 = ws.getRow(5 + i); R0.values = r; R0.eachCell(c => { c.alignment = { wrapText: true, vertical: "top" }; c.border = { bottom: { style: "thin", color: { argb: "FFDDDDDD" } } }; }); });
+    widths.forEach((w, i) => ws.getColumn(i + 1).width = w); return ws; };
+  const all = R("pre").filter(p => p.ym === ym).sort((a, b) => preWhen(a) - preWhen(b) || a.machine.localeCompare(b.machine));
+  sheet("Checklists", "Pre-use checklists", ["Date", "Shift", "Machine", "Checklist no.", "Operator", "SMR", "SMR vs opening hrs", "A-hazard NO GO", "GO BUT / B and C", "Other defects", "Artisan comments", "Previous 4 closed out"],
+    all.map(p => { const F = preFinds(p); return [fmt(p.date), p.shift, p.machine, p.no || "-", p.operator || "-", p.smr === "" ? "-" : p.smr, preSmrCheck(p) || "-", F.filter(f => f.it[2] === "A" && f.v === "NG").map(f => f.it[1]).join(", ") || "-", F.filter(f => !(f.it[2] === "A" && f.v === "NG")).map(f => `${f.v === "NG" ? "NO GO" : "GO BUT"} ${f.it[1]}`).join(", ") || "-", p.other || "-", p.artisan || "-", p.prev4 || "-"]; }),
+    [11, 8, 11, 12, 16, 9, 22, 30, 34, 26, 26, 12]);
+  sheet("Open defects", "Open defects from pre-use checklists", ["Machine", "Item", "Marked", "Class", "First seen", "Times seen"], preOpen().map(f => [f.p.machine, f.it[1], f.v === "NG" ? "NO GO" : "GO BUT", f.it[2] === "A" && f.v === "NG" ? "A – must not be used" : f.it[2] + "-hazard", `${fmt(f.p.date)} ${f.p.shift}`, f.n]), [12, 34, 10, 22, 18, 11]);
+  const S = preStats(ym + "-01", today()); sheet("Completion", "Checklist completion", ["Machine", "Shifts worked", "Checklists received", "Completion"], preRB().map(mc => [mc, S[mc]?.due || 0, S[mc]?.got || 0, pcTxt(S[mc]?.got || 0, S[mc]?.due || 0)]), [12, 14, 18, 12]);
+  const blob = new Blob([await wb.xlsx.writeBuffer()], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }); const { deliver } = await import("../lib/deliver.js"); deliver(blob, `TKR_Pre-use_Checklists_${ym}.xlsx`); }
 function firstDay(mc) { const k = "first|" + mc; if (lkMemo.has(k)) return lkMemo.get(k); let f = today();
   for (const r of recs) if (r.kind === "hr" && !r.deleted && r.machine === mc && r.date < f && (Object.values(r.cells || {}).some(v => v && v !== "-") || Object.values(r.meter || {}).some(m => meterHrs(m) != null))) f = r.date;
   for (const e of downEvs(mc)) { const d0 = String(e.start).slice(0, 10); if (d0 < f) f = d0; } lkMemo.set(k, f); return f; }
@@ -1368,6 +1472,11 @@ async function clickH(ev) {
   if (b.dataset.site) { const [m, k] = b.dataset.site.split("|"), f = document.querySelector("#fSite [name=from]"), ms = toMs(f?.value) || Date.now();
     if (ms > Date.now()) { toast("Pick a time that has passed."); return; } await setSite(m, k === "off", ms); const gi = fleet().findIndex(([, L]) => L.includes(m)); openEv(siteForm(gi), "On site / not on site"); render(); toast(`${m} ${k === "off" ? "marked not on site" : "back on site"}.`); return; }
   if (b.dataset.rmmg) { openEv(machForm(+b.dataset.rmmg, "rm"), "Remove a machine"); return; }
+  if (b.dataset.precap !== undefined) { openEv(preForm(b.dataset.precap, b.dataset.preid), "Pre-use checklist"); return; }
+  if (b.dataset.preday) { const { d: d0, sh: s0 } = shiftNow(); let d = preDay || d0, sh = preSh || s0; if (+b.dataset.preday < 0) { if (sh === "Night") sh = "Day"; else { sh = "Night"; d = addDays(d, -1); } } else { if (sh === "Day") sh = "Night"; else { sh = "Day"; d = addDays(d, 1); } } preDay = d; preSh = sh; render(); return; }
+  if (b.dataset.prexl !== undefined) { try { await preExcel(); } catch (e) { console.warn(e); toast("The Excel file couldn't be made."); } return; }
+  if (b.dataset.prewa !== undefined) { const t = preWhatsApp(); try { await navigator.clipboard.writeText(t); toast("Summary copied. Paste it in WhatsApp."); } catch { openEv(`<textarea style="width:100%;min-height:300px">${esc(t)}</textarea>`, "WhatsApp summary"); } return; }
+  if (b.dataset.prefix) { await preFixed(b.dataset.prefix); return; }
   if (b.dataset.tab) { tab = b.dataset.tab; closeSheet(app); render(); scrollTo(0, 0); return; }
   if (b.dataset.dnav) { date = addDays(date, +b.dataset.dnav); render(); return; }
   if (b.hasAttribute("data-today")) { date = today(); render(); return; }
@@ -1408,6 +1517,7 @@ async function clickH(ev) {
 }
 async function submitH(ev) {
   const f = ev.target; ev.preventDefault();
+  if (f.id === "fPre") { await savePre(f); return; }
   if (f.id === "fAdd") { const name = f.elements.name.value.trim().replace(/\s+/g, " "), p = f.elements.pin.value, p2 = f.elements.pin2.value;
     if (name.length < 3) { toast("Type your name and surname."); return; } if (!/^\d{4}$/.test(p)) { toast("The PIN must be 4 numbers."); return; } if (p !== p2) { toast("The two PINs are not the same."); return; }
     if (R("user").some(u => u.name.toLowerCase() === name.toLowerCase())) { toast("That name is already on this PC. Tap it to sign in."); addingMe = false; render(); return; }
