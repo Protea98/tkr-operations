@@ -120,13 +120,13 @@ table.xl td.tm span.lk{color:#8a8a8a}
 table.xl input.lk,input.lk{background:#ececec!important;color:#8a8a8a!important;cursor:pointer}
 .tick.lk{filter:grayscale(1);opacity:.55}
 #who{display:flex;align-items:center;gap:4px;justify-content:flex-end;flex-wrap:wrap}
-table.xl select.ty.carry{opacity:.6;border-style:dashed}
+table.xl select.ty.carry{opacity:.6;border-color:#9a9a9a}
 table.xl .mbtn{min-height:28px;padding:2px 8px;font-size:12.5px;font-weight:700;background:#fff8e6;color:#111;border:1px solid #d4a12a;border-radius:4px;cursor:pointer;white-space:nowrap}
 table.xl .mbtn i{font-style:normal;background:#9c0006;color:#fff;border-radius:99px;padding:0 6px;margin-left:4px;font-size:11px}
 .mach.UN{border-left-color:#8a8378;opacity:.8}
 .mach.UN small{color:#c9a227}
 /* locked hour boxes: keep the colour so the value is easy to read, with a lock */
-table.xl td.hc.lk .lkv{min-width:54px;line-height:28px;border:1px dashed #9a9a9a;font-weight:800}
+table.xl td.hc.lk .lkv{min-width:54px;line-height:28px;border:1px solid #b5b5b5;font-weight:800}
 table.xl td.hc.lk .lkv.OP{background:#e2f0d9;color:#375623}
 table.xl td.hc.lk .lkv.BD{background:#fde2df;color:#9c0006}
 table.xl td.hc.lk .lkv.PM{background:#ddebf7;color:#1f4e78}
@@ -140,7 +140,7 @@ table.xl td.hc button.hbtn{width:54px;height:30px;font-weight:700;text-align:cen
 table.xl td.hc button.hbtn.OP{background:#e2f0d9;color:#375623}
 table.xl td.hc button.hbtn.BD{background:#fde2df;color:#9c0006}
 table.xl td.hc button.hbtn.PM{background:#ddebf7;color:#1f4e78}
-table.xl td.hc button.hbtn.carry{opacity:.6;border-style:dashed}
+table.xl td.hc button.hbtn.carry{opacity:.6;border-color:#9a9a9a}
 table.xl td.hc button.hbtn:focus-visible{outline:2px solid var(--gold,#d4a12a);outline-offset:1px}
 .hpop{position:absolute;z-index:9999;display:flex;flex-wrap:wrap;gap:6px;align-items:center;background:#fff;border:1px solid #bbb;border-radius:8px;padding:8px;box-shadow:0 8px 24px rgba(0,0,0,.25);max-width:240px}
 .hpop button{min-width:52px;min-height:40px;font-weight:800;border:1px solid #c9c9c9;border-radius:6px;cursor:pointer;background:#fff;color:#111}
@@ -182,7 +182,7 @@ table.xl td.hc button.hbtn.OP.auto{background:#eef6e8;color:#5b7a46;font-weight:
 .hb.OP{background:#1f4d33;border-color:#2e7d4f;color:#d8f5e2}
 .hb.BD{background:#6b1f19;border-color:#b3402f;color:#ffe1dc}
 .hb.PM{background:#1d3a5f;border-color:#3b6ea8;color:#dbe9ff}
-.hb.fut{background:transparent;border-style:dashed;color:#777}
+.hb.fut{background:transparent;border-color:#2b2e2c;color:#777}   /* plain border: dashed rounded boxes are very slow for phones to draw while scrolling */
 .hb.now{outline:3px solid var(--gold,#d4a12a);outline-offset:1px}
 @media (max-width:760px){
   .hbrow{grid-template-columns:1fr;gap:6px}
@@ -256,7 +256,7 @@ table.mini tr.gh td{padding-top:10px;color:var(--gold,#d4a12a)}
 table.mini tr.bad td{background:rgba(192,57,43,.14)}table.mini tr.warn td{background:rgba(201,162,39,.10)}
 /* last service / service due */
 td.svc{min-width:92px;text-align:center}
-.svcb{display:flex;flex-direction:column;align-items:center;width:100%;background:none;border:1px dashed rgba(128,128,128,.5);border-radius:6px;padding:2px 4px;cursor:pointer;color:inherit;font:inherit;min-height:34px}
+.svcb{display:flex;flex-direction:column;align-items:center;width:100%;background:none;border:1px solid rgba(128,128,128,.4);border-radius:6px;padding:2px 4px;cursor:pointer;color:inherit;font:inherit;min-height:34px}
 .svcb b{font-size:13px}.svcb small{font-size:10.5px;opacity:.75}
 td.svc small.left{display:block;font-size:10.5px;opacity:.8;margin-top:2px}
 td.svc.due{background:#fde2de!important}td.svc.due small.left{color:#c0392b;font-weight:700;opacity:1}
@@ -275,5 +275,5 @@ td.lt .pittick{display:flex!important;margin:4px 0 0;width:max-content}
 .pittag{display:inline-block;margin-left:6px;padding:1px 7px;border-radius:999px;background:#d4a12a;color:#111;font-size:10.5px;font-weight:800;letter-spacing:.04em;vertical-align:middle}
 .mdocs{display:flex;flex-wrap:wrap;gap:4px;margin-top:5px}
 .mdocs .sm{min-height:26px;padding:2px 8px;font-size:11.5px}
-.mdocs .none{font-size:11px;opacity:.65;padding:3px 6px;border:1px dashed rgba(128,128,128,.5);border-radius:6px}
+.mdocs .none{font-size:11px;opacity:.65;padding:3px 6px;border:1px solid rgba(128,128,128,.5);border-radius:6px}
 .mntwait.need{border:1px solid #d4a12a;background:rgba(212,161,42,.08)}
