@@ -85,7 +85,7 @@ onAuthStateChanged(auth, async u => {
     managers = []; startApp(); return; }
   subs.push(onSnapshot(doc(db, "config", "roles"), s => { managers = ((s.exists() && s.data().managers) || []).map(x => String(x).toLowerCase()); startApp(); }, () => startApp()));
 });
-function showGate(msg = "", html = false) { if ($("mWrap")) $("mWrap").hidden = true; $("gate").hidden = false; app.hidden = true; $("signBtn").hidden = true; if (html) $("sErr").innerHTML = msg; else $("sErr").textContent = msg; $("mErr").textContent = ""; loadMemberNames(); }
+function showGate(msg = "", html = false) { try { if (!$("sEmail").value) $("sEmail").value = localStorage.getItem("fc-last-email") || ""; } catch {} if ($("mWrap")) $("mWrap").hidden = true; $("gate").hidden = false; app.hidden = true; $("signBtn").hidden = true; if (html) $("sErr").innerHTML = msg; else $("sErr").textContent = msg; $("mErr").textContent = ""; loadMemberNames(); }
 function gateOrApp() { startApp(); }
 let wantTab = "";   // the admin tab someone tapped before signing in: opened straight after sign-in
 function startApp() {
@@ -142,7 +142,7 @@ let rawSettings = {};
 function mergeSettings(x) { const s = structuredClone(DEFAULTS); for (const k of ["price", "life", "spare"]) Object.assign(s[k], x[k] || {}); Object.assign(s.price, stPrice); if (x.nextBits !== undefined) s.nextBits = x.nextBits; return s; }
 $("signForm").onsubmit = async e => {
   e.preventDefault(); $("sErr").textContent = "Signing in…";
-  try { await signInWithEmailAndPassword(auth, toLogin($("sEmail").value), $("sPass").value); $("sPass").value = ""; }
+  try { await signInWithEmailAndPassword(auth, toLogin($("sEmail").value), $("sPass").value); $("sPass").value = ""; try { localStorage.setItem("fc-last-email", $("sEmail").value.trim()); } catch {} }
   catch (err) { $("sErr").textContent = String(err?.code || "").includes("network") ? "No signal. Signing in needs signal." : "Email or password is wrong."; }
 };
 $("signBtn").onclick = async () => {
