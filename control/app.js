@@ -70,6 +70,7 @@ const R = k => { if (!kindIdx) { kindIdx = new Map(); for (const r of recs) if (
 /* Locking: every filled box remembers the shift (session) that filled it. Once that controller logs out,
    the box is grey and locked for everyone else; empty boxes stay open. Locked boxes change only with admin approval. */
 const CTRL_ADMIN = ["muneer@tkroperations.com"];
+const ADM_EMAIL = { "muneer@tkroperations.com": "adm_muneer", "amogelang@tkroperations.com": "adm_amogelang", "amogelangmabilu56@gmail.com": "adm_amogelang" };   // a locked-out admin gets back in with their own TKR email and password
 const TRACK = new Set(["hr", "ev", "chk", "inv", "add"]);
 const META_K = new Set(["id", "kind", "ym", "editedAt", "by", "synced", "fs", "deleted", "date", "at", "group", "grid", "endBy", "sid", "item", "svc", "doc"]);
 const filled = v => v != null && v !== "";
@@ -217,13 +218,14 @@ function gateView() {
     return pageHead("Control Room", `${a.name} – admin`, "", "", set ? "Type the setup code the other admin gave you, then choose a 4-digit admin PIN and type it twice." : "Type your admin PIN. Forgot it? The other admin can reset it under Requests.")
       + `<form id="fAdm2" data-id="${a.id}" class="card" style="max-width:360px" autocomplete="off">${set && ADMINS.some(x => admPin(x.id)) ? `<input name="code" inputmode="numeric" maxlength="6" type="text" autocomplete="off" required placeholder="Setup code from the other admin" style="margin-bottom:10px">` : ""}<input name="pin" class="pin" inputmode="numeric" maxlength="4" type="text" autocomplete="one-time-code" style="-webkit-text-security:disc" required placeholder="${set ? "New PIN" : "PIN"}">
         ${set ? `<input name="pin2" class="pin" inputmode="numeric" maxlength="4" type="text" autocomplete="one-time-code" style="-webkit-text-security:disc;margin-top:10px" required placeholder="Again">` : ""}
-        <div class="row" style="margin-top:14px"><button class="primary" style="flex:1">Open as admin</button><button type="button" class="ghost" id="cancelAdm">Back</button></div><p class="flag" id="pinErr"></p></form>`; }
+        <div class="row" style="margin-top:14px"><button class="primary" style="flex:1">Open as admin</button><button type="button" class="ghost" id="cancelAdm">Back</button></div><p class="flag" id="pinErr"></p>
+        <p class="muted" style="margin-bottom:0">Forgot your PIN, or it asks for a setup code? <button type="button" class="sm ghost" id="admReset">Get back in with your TKR email</button></p></form>`; }
   if (adminStep === "pin") { const a = adminRec();
     return pageHead("Control Room", "Admin", "", "", "Type your admin PIN. No signal needed.")
       + `<form id="fAdmPin" class="card" style="max-width:360px" autocomplete="off"><input name="pin" class="pin" inputmode="numeric" maxlength="4" type="text" autocomplete="one-time-code" style="-webkit-text-security:disc" required>
         <div class="row" style="margin-top:14px"><button class="primary" style="flex:1">Open as admin</button><button type="button" class="ghost" id="cancelAdm">Back</button></div><p class="flag" id="pinErr"></p>
         <p class="muted" style="margin-bottom:0">Forgot it? <button type="button" class="sm ghost" id="admReset">Sign in with your TKR email again</button></p></form>`; }
-  if (adminStep === "email") return pageHead("Control Room", "Admin sign-in", "", "", "Once only on this PC, with signal: sign in with your TKR admin email and password, then choose a 4-digit admin PIN. After that the PIN works with no signal.")
+  if (adminStep === "email") return pageHead("Control Room", "Admin sign-in", "", "", "With signal: sign in with your TKR admin email and password, then choose your 4-digit admin PIN. That PIN is then your admin PIN everywhere in the Control Room, with no signal needed.")
     + `<form id="fAdm" class="card" style="max-width:460px" autocomplete="off"><label>TKR email <input name="e" type="email" autocapitalize="none" required></label>
       <label style="margin-top:10px;display:block">Password <input name="p" type="password" required></label>
       <label style="margin-top:10px;display:block">Choose a 4-digit admin PIN <input name="pin" class="pin" inputmode="numeric" maxlength="4" pattern="\\d{4}" type="text" autocomplete="one-time-code" style="-webkit-text-security:disc" required></label>
@@ -1733,7 +1735,10 @@ async function submitH(ev) {
   if (f.id === "fAdm") { if (!navigator.onLine) { toast("The first admin sign-in needs signal."); return; } const p = f.elements.pin.value; if (!/^\d{4}$/.test(p)) { toast("The PIN must be 4 numbers."); return; }
     try { const m = await import("../lib/firebase.js"); admApp = admApp || m.initializeApp(FB_CFG, "ctrlAdmin"); const auth = m.getAuth(admApp);
       const c = await m.signInWithEmailAndPassword(auth, toLogin(f.elements.e.value), f.elements.p.value), em = String(c?.user?.email || "").toLowerCase(); await m.signOut(auth).catch(() => {});
-      if (!CTRL_ADMIN.includes(em)) { toast("Only the Control Room admin can sign in here."); return; }
+      const aid = ADM_EMAIL[em]; if (aid) { const A = ADMINS.find(x => x.id === aid), old = byId(aid + "_pin");   // restore the admin: new PIN, any setup code cleared
+        await put({ ...(old || {}), id: aid + "_pin", kind: "admin2", ym: "setup", name: A.name, pin: await pinHash("admin2|" + aid, p), setup: "", deleted: false }, `${A.name} signed in with the TKR email and set a new admin PIN`);
+        await startSession({ id: aid, name: A.name + " (admin)", admin: true }); adminStep = ""; tab = "req"; render(); toast("You're back in as admin. Your new PIN works from now on."); return; }
+      if (!CTRL_ADMIN.includes(em)) { toast("Only the Control Room admins can sign in here."); return; }
       const a = await put({ id: "admin_" + em.replace(/\W+/g, ""), kind: "admin", ym: "setup", email: em, name: "Muneer (admin)", pin: await pinHash("admin|" + em, p) });
       await startSession({ id: a.id, name: a.name, admin: true }); adminStep = ""; tab = "req"; render(); toast("Signed in as admin. Next time your PIN is enough."); }
     catch (x) { console.warn(x); const c = String(x?.code || ""), msg = c.includes("too-many-requests") ? "Too many tries – Firebase has paused sign-in for a few minutes. Wait, or tap Forgot password." : c.includes("network") ? "No signal reached the TKR app. Try again with signal." : c.includes("invalid-email") ? "That email isn't right. Use muneer@tkroperations.com." : "The email or password is wrong. Use muneer@tkroperations.com and your TKR app password, or tap Forgot password.";
