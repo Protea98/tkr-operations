@@ -87,7 +87,9 @@ onAuthStateChanged(auth, async u => {
 });
 function showGate(msg = "", html = false) { if ($("mWrap")) $("mWrap").hidden = true; $("gate").hidden = false; app.hidden = true; $("signBtn").hidden = true; if (html) $("sErr").innerHTML = msg; else $("sErr").textContent = msg; $("mErr").textContent = ""; loadMemberNames(); }
 function gateOrApp() { startApp(); }
+let wantTab = "";   // the admin tab someone tapped before signing in: opened straight after sign-in
 function startApp() {
+  if (wantTab && isAdmin()) { tab = wantTab; wantTab = ""; }
   $("gate").hidden = true; app.hidden = false; document.body.classList.toggle("pub", isPublic());
   $("signBtn").hidden = false; $("signBtn").textContent = isPublic() && !(user && !user.isAnonymous) ? "Sign in" : "Sign out";
   $("who").textContent = isAdmin() ? showName(email) + " · admin" : isManager() ? showName(email) + " · manager" : member ? member.name + " · member" : "Viewing";
@@ -126,7 +128,7 @@ $("rGo").onclick = async () => { const name = $("rName").value.replace(/\s+/g, "
     m.textContent = "Sent. Admin will approve you, then choose your name above and sign in with your PIN."; $("rName").value = $("rPin").value = $("rPin2").value = ""; }
   catch (x) { m.textContent = String(x?.code || "").includes("network") || !navigator.onLine ? "No signal. Try again with signal." : "It didn't send. Try again."; }
   $("rGo").disabled = false; };
-$("gateBack").onclick = () => startApp();
+$("gateBack").onclick = () => { wantTab = ""; startApp(); };
 async function decideMember(id, status) {
   try { await setDoc(doc(db, "fcMembers", id), { status, decidedBy: email, decidedAt: Date.now() }, { merge: true });
     if (status !== "approved") { const ss = await getDocs(query(collection(db, "fcMemberSess"), where("member", "==", id))); for (const d of ss.docs) await deleteDoc(d.ref); }
@@ -234,7 +236,8 @@ const tabs = [["dash", "Dashboard"], ["metres", "Metres"], ["docs", "Documents"]
 function render() {
   if (app.hidden) return;
   const c = calc(reportDate);
-  const head = `<div class="tabs" role="tablist">${tabs.filter(([k]) => isAdmin() || ["dash"].includes(k)).map(([k, t]) => `<button role="tab" aria-selected="${tab === k}" data-tab="${k}">${t}</button>`).join("")}</div>`;
+  if (!isAdmin() && tab !== "dash") tab = "dash";
+  const head = `<div class="tabs" role="tablist">${tabs.map(([k, t]) => `<button role="tab" aria-selected="${tab === k}" data-tab="${k}"${!isAdmin() && k !== "dash" ? ` title="Sign in as admin to open ${t}"` : ""}>${t}</button>`).join("")}</div>`;
   let body = "";
   if (tab === "dash") body = membersCard() + dash(c);
   if (tab === "metres") body = "";
@@ -443,7 +446,7 @@ function importView() {
 app.addEventListener("click", async e => {
   const b = e.target.closest("button"); if (!b) return;
   if (metresChartClick(b)) { render(); return; }
-  if (b.dataset.tab) { tab = b.dataset.tab; render(); return; }
+  if (b.dataset.tab) { const k = b.dataset.tab; if (k !== "dash" && !isAdmin()) { wantTab = k; showGate(`Sign in as admin to open ${tabs.find(x => x[0] === k)?.[1] || "this tab"}.`); const d = $("signForm")?.closest("details"); if (d) d.open = true; $("sEmail")?.focus(); return; } tab = k; render(); return; }
   if (b.dataset.mem) { const [id, st] = b.dataset.mem.split("|"); if (st !== "approved" && !confirm(st === "removed" ? "Remove this member? They will be signed out." : "Decline this registration?")) return; b.disabled = true; await decideMember(id, st); return; }
   if (await drill.onClick(e)) return;
   if (b.dataset.del) { const [c, id] = b.dataset.del.split("|"); if (confirm("Delete this line?")) deleteDoc(doc(db, c, id)).catch(fail); return; }
